@@ -17,9 +17,8 @@ files_to_download = [
     "chinese-hubert-base/*" # Hubert model
 ]
 
-files_to_download = [
-    "*"
-]
+# # if you want to download all files, uncomment the following line
+# files_to_download = ["*"]
 
 print("Downloading GPT-SoVITS pretrained models...")
 
