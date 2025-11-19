@@ -1,0 +1,1 @@
+from .api_silicon_functional import define_speaker, get_tts_wav

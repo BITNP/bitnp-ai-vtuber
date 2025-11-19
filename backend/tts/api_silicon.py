@@ -1,7 +1,7 @@
 # This file is modified on the basis of official "api.py"
 
 """
-Modified API for GPT-SoVITS v1
+Modified Uvicorn API Server for GPT-SoVITS v1
 
 Usage:
     python api_silicon.py --port 9880
