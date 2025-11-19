@@ -137,6 +137,8 @@ connected_agents: set[str] = set()
 
 async def handle_agent_message(client_id: str, message_data: dict) -> dict | None:
     """处理智能体发送的消息"""
+    # logging.info(f"智能体 {client_id} 发送消息: {message_data}") # DEBUG
+
     message_type = message_data.get("type", "")
 
     if message_type == "":
@@ -156,8 +158,8 @@ async def handle_agent_message(client_id: str, message_data: dict) -> dict | Non
 
 async def handle_frontend_message(client_id: str, message_data: dict) -> dict | None:
     """处理前端发送的消息"""
-    logging.info(f"前端 {client_id} 发送消息: {message_data}")
-    # 这里可以添加消息处理逻辑
+    # logging.info(f"前端 {client_id} 发送消息: {message_data}") # DEBUG
+
     message_type = message_data.get("type", "")
 
     if message_type == "":
@@ -180,6 +182,7 @@ async def handle_frontend_message(client_id: str, message_data: dict) -> dict | 
         event_data = message_data.get("data", {})
         agent_name = frontend_manager.users.get(client_id, {}).get("agent_name", "")
         for client_id in agent_manager.get_client_ids_by_agent_name(agent_name):
+            # logging.info(f"向智能体 {agent_name} 发送事件: {event_data}") # DEBUG
             await agent_manager.send_personal_message(json.dumps({"time": datetime.now().isoformat(), "data": event_data}), client_id)
         return {"type": "success", "message": "event sent"}
 

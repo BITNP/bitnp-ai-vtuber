@@ -2,12 +2,16 @@
 AI VTuber Agent (behavior controller)
 """
 
-from ..llm_api import create_bot
 from typing import Literal, Union, Callable
 
 import asyncio
 import json
 import websockets
+
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from llm_api import create_bot
 
 BotConfig = dict[Union[Literal["api_name"], str], str]
 TimeStampISO = str
@@ -55,7 +59,7 @@ class Agent:
                 ...
             ```
         """
-        def decorator(func: Callable['Agent', TimeStampISO, EventData]):
+        def decorator(func: Callable[['Agent', TimeStampISO, EventData], None]):
             if event_type not in self._event_handlers:
                 self._event_handlers[event_type] = []
             self._event_handlers[event_type].append(func)
@@ -89,10 +93,14 @@ class Agent:
                                 await handler(self, "", {})
                             else:
                                 handler(self, "", {})
-                    message = await asyncio.wait_for(ws.recv(), timeout=0.1)  # 0.1 秒超时
+
+                    print("agent alive")
+
                     try:
+                        message = await asyncio.wait_for(ws.recv(), timeout=1)  # 1 秒超时
                         message = json.loads(message)
-                    except json.JSONDecodeError:
+                        print(f"智能体 {self.agent_name} 接收事件: {message}") # DEBUG
+                    except (json.JSONDecodeError, asyncio.TimeoutError):
                         continue
 
                     if type(message) is not dict:
@@ -101,6 +109,8 @@ class Agent:
                     time_iso: str = message.get("time", "")
                     event_data: dict = message.get("data", {})
                     event_type: str = event_data.get("type", "")
+
+                    print(self._event_handlers.get(event_type, None)) # DEBUG
 
                     # event handlers
                     if event_type != "loop" and event_type in self._event_handlers:
