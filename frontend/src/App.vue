@@ -12,7 +12,8 @@
 // import Demo from './Demo/SoyoAndAnon.vue'
 // import Demo from './Demo/DAver_single.vue'
 
-import Demo from './Demo/DAverVTuber.vue'
+// import Demo from './Demo/DAverVTuber.vue'
+import Demo from './Demo/BasicChattingApp.vue'
 
 export default {
   components: {

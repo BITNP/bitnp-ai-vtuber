@@ -4,6 +4,7 @@ Basic chatting agent
 from .abstract_agent import Agent, BotConfig, EventData
 
 import base64
+import asyncio
 import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -46,20 +47,36 @@ class BasicChattingAgent(Agent):
         # self.brackets_parsor_node.connect_to(LambdaNode(lambda _, data: print("brackets_parsor:", data, flush=True))) # DEBUG
         # self.event_emitter.connect_to(LambdaNode(lambda _, data: print("event_emitter:", data, flush=True))) # DEBUG
 
+        self._curr_task: asyncio.Task = None
+
         @self.on("user_input")
         async def handle_user_input(_, timestamp: str, event_data: EventData):
             """
             Handle user input event
             """
-            content = event_data.get("content", "")
 
-            if is_empty(content):
-                return
-            
-            # 调用 LLM API 处理用户输入
-            self.llm.append_context(content, "user")
-            res = await self.llm.respond_to_context()
+            if self._curr_task:
+                print("[interrupted!]")
+                self._curr_task.cancel()
+
+            async def task_func():
+                content = event_data.get("content", "")
+
+                if is_empty(content):
+                    return
+                
+                # 调用 LLM API 处理用户输入
+                self.llm.append_context(content, "user")
+                res_task = asyncio.create_task(self.llm.respond_to_context())
             # print(f"LLM 回复: {res}") # DEBUG
+
+            print("creating task")
+            task = asyncio.create_task(task_func())
+            self._curr_task = task
+        
+        @self.loop
+        async def test_loop(self: 'BasicChattingAgent'):
+            print("test_loop")
 
         @self.llm.on("message_delta")
         async def handle_message_delta(data):
@@ -69,10 +86,11 @@ class BasicChattingAgent(Agent):
         async def handle_done(data):
             await self.sentence_sep_node.handle(" ")
     
-    def generate_tts_base64(self, text: str, text_language: str):
+    async def generate_tts_base64(self, text: str, text_language: str):
         """
         Generate TTS base64 audio data
         """
+        print("generating tts:", text)
         wav_generator = get_tts_wav(text=text, text_language=text_language, spk=self.agent_name)
         wav_data = b""
         for chunk in wav_generator:
@@ -88,8 +106,10 @@ class BasicChattingAgent(Agent):
         data_type = data.get("type", "")
         content = data.get("content", "")
 
+        await asyncio.sleep(0) # check point (to check if the conversation is interrupted)
+
         if data_type == "text":
-            media_data = self.generate_tts_base64(text=content, text_language="zh")
-            await self.emit({"command_type": "say_aloud", "content": content, "media_data": media_data})
+            media_data = await self.generate_tts_base64(text=content, text_language="zh")
+            await self.emit({"type": "say_aloud", "content": content, "media_data": media_data})
         elif data_type == "tag":
-            await self.emit({"command_type": "bracket_tag", "content": content})
+            await self.emit({"type": "bracket_tag", "content": content})
