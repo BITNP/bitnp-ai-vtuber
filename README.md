@@ -44,9 +44,14 @@ pnpm dev
 ```
 
 **后端**
-启动语音合成
+启动后端服务器
 ``` shell
-cd backend/tts
-conda activate gptsovits
-python api_silicon.py
+cd backend
+python run_server.py
+```
+
+启动 agent 并连接到后端
+``` shell
+cd backend
+python run_agent.py
 ```
