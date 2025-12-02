@@ -74,6 +74,25 @@ export default class Live2dController {
 
         this.faceParamExpressionLoopId = null;
 
+        // 马尔可夫链状态管理
+        this.idleState = 'idle'; // 初始状态改为idle，与stateDurations匹配
+        this.stateStartTime = 0;
+        this.stateDuration = 0;
+        
+        // 状态转移矩阵 [from][to] = probability
+        this.transitionMatrix = {
+            'headShake': { 'headShake': 0.3, 'blink': 0.7 },
+            'blink': { 'headShake': 0.3, 'blink': 0.1, 'idle': 0.6 },
+            'idle': { 'headShake': 0.1, 'blink': 0.4, 'idle': 0.5 } // 添加idle状态的转移规则
+        };
+        
+        // 各状态持续时间范围 (毫秒)
+        this.stateDurations = {
+            'headShake': [3000, 6000],
+            'blink': [400, 600],
+            'idle': [1000, 3000]
+        };
+
         /**
          * 口型同步函数
          * @returns {number} 口型同步值
@@ -110,13 +129,24 @@ export default class Live2dController {
             }
         };
 
-        const breathCycle = 3000;
+        // 初始化状态
+        this.startNewState();
 
         this.faceParamExpressionLoopId = setInterval(() => {
             const time = Date.now();
-            // const breath = Math.sin(time / breathCycle * (Math.PI)) * Math.sin(time / breathCycle * (Math.PI)); // 计算呼吸参数
-            const breath = 0.5 + 0.6 * Math.sin(time / breathCycle * (2 * Math.PI))
+            
+            // 确保呼吸参数始终应用
+            const breathCycle = 3000;
+            const breath = 0.5 + 0.6 * Math.sin(time / breathCycle * (2 * Math.PI));
             self.dictParams["ParamBreath"] = breath;
+            
+            // 检查是否需要状态转移
+            if (time - this.stateStartTime > this.stateDuration) {
+                this.transitionState();
+            }
+            
+            // 执行当前状态的动作
+            this.executeCurrentState(time);
 
             if (!self.faceParamExpressionName) {
                 faceParamExpressionReset();
@@ -133,6 +163,7 @@ export default class Live2dController {
             }
             const frame = data[frameIndex];
             self.dictParams = transferParams(frame, self.dictParams);
+            // 确保呼吸参数始终应用
             self.dictParams["ParamBreath"] = breath;
             self.faceParamExpressionFrame += 1;
         }, 1000 / fps);
@@ -144,6 +175,76 @@ export default class Live2dController {
      */
     setLipSyncFunc(func) {
         this.lipSyncFunc = func;
+    }
+
+    // 开始新状态
+    startNewState() {
+        this.stateStartTime = Date.now();
+        const [minDur, maxDur] = this.stateDurations[this.idleState];
+        this.stateDuration = minDur + Math.random() * (maxDur - minDur);
+    }
+
+    // 状态转移
+    transitionState() {
+        const currentState = this.idleState;
+        const transitions = this.transitionMatrix[currentState];
+        
+        // 根据转移概率选择下一个状态
+        let random = Math.random();
+        let cumulativeProb = 0;
+        
+        for (const [state, prob] of Object.entries(transitions)) {
+            cumulativeProb += prob;
+            if (random < cumulativeProb) {
+                this.idleState = state;
+                this.startNewState();
+                break;
+            }
+        }
+    }
+
+    // 执行当前状态的动作
+    executeCurrentState(time) {
+        const k = 0.2;
+        
+        switch (this.idleState) {
+            case 'headShake':
+                this.executeHeadShake(time, k);
+                break;
+            case 'blink':
+                this.executeBlink(time, k);
+                break;
+            case 'idle':
+                // 空闲状态，保持自然姿态
+                break;
+        }
+    }
+
+    // 执行摇头动作
+    executeHeadShake(time, k) {
+        const idleCycle = 3000;
+        const angleX = Math.sin(time / idleCycle * (2 * Math.PI)) * 5;
+        const angleZ = Math.cos(time / idleCycle * (2 * Math.PI)) * 3;
+        const threshold = 0.1;
+        
+        if (Math.abs(this.dictParams["ParamAngleX"] - angleX) > threshold) {
+            this.dictParams["ParamAngleX"] = this.dictParams["ParamAngleX"] * (1 - k) + angleX * k;
+        }
+        if (Math.abs(this.dictParams["ParamAngleZ"] - angleZ) > threshold) {
+            this.dictParams["ParamAngleZ"] = this.dictParams["ParamAngleZ"] * (1 - k) + angleZ * k;
+        }
+    }
+
+    // 执行眨眼动作
+    executeBlink(time, k) {
+        const elapsed = time - this.stateStartTime;
+        const progress = Math.min(elapsed / this.stateDuration, 1);
+        
+        // 使用正弦函数创建平滑的眨眼曲线
+        const eyeOpen = Math.cos(progress * Math.PI);
+        
+        this.dictParams["ParamEyeLOpen"] = this.dictParams["ParamEyeLOpen"] * (1 - k) + eyeOpen * k;
+        this.dictParams["ParamEyeROpen"] = this.dictParams["ParamEyeROpen"] * (1 - k) + eyeOpen * k;
     }
 
     async setup() {
@@ -231,7 +332,6 @@ export default class Live2dController {
 
         updateModelPosition();
 
-        let nextBlinkTime = -1;
         function handleModelUpdate(model, dictParams) {
             if (self.firstUpdate) {
                 // 在首次调用时，获取模型初始化参数，用于重置模型状态
@@ -247,50 +347,10 @@ export default class Live2dController {
 
             const isIdle = (!self.faceParamExpressionName);
             if (isIdle) {
-                const time = Date.now();
-                const idleCycle = 3000;
-                const k = 0.2;
-
-                // 头部运动
-                const angleX = Math.sin(time / idleCycle * (2 * Math.PI)) * 5;
-                const angleZ = Math.cos(time / idleCycle * (2 * Math.PI)) * 3;
-                const threshold = 0.1;
-                if (Math.abs(dictParams["ParamAngleX"] - angleX) > threshold) {
-                    dictParams["ParamAngleX"] = dictParams["ParamAngleX"] * (1 - k) + angleX * k;
-                }
-                if (Math.abs(dictParams["ParamAngleZ"] - angleZ) > threshold) {
-                    dictParams["ParamAngleZ"] = dictParams["ParamAngleZ"] * (1 - k) + angleZ * k;
-                }
-
                 // 在 idle 状态下抑制兔耳抖动
-                const ear = 0;
-                dictParams["Param2"] = 0;
-                dictParams["Param3"] = 0;
-                // if (Math.abs(dictParams["Param2"] - ear) > 0) {
-                //     // dictParams["Param2"] = dictParams["Param2"] * (1 - k) + ear * k;
-                //     dictParams["Param2"] = 0;
-                // }
-                // if (Math.abs(dictParams["Param3"] - ear) > 0) {
-                //     dictParams["Param3"] = 0;
-                //     // dictParams["Param3"] = dictParams["Param3"] * (1 - k) + ear * k;
-                // }
-
-                // 眨眼
-                const blinkLength = 400;
-                if (time - nextBlinkTime > blinkLength) {
-                    nextBlinkTime = time + 3000 + (Math.random() * 4000); // 眨眼间隔 3-7 秒
-                } else {
-                    const dt = time - nextBlinkTime;
-                    let eyeOpen = 1;
-                    if (dt > 0) {
-                        eyeOpen = 1 - 1.3 * Math.sin(dt / blinkLength * Math.PI);
-                    }
-
-                    dictParams["ParamEyeLOpen"] = dictParams["ParamEyeLOpen"] * (1 - k) + eyeOpen * k;
-                    dictParams["ParamEyeROpen"] = dictParams["ParamEyeROpen"] * (1 - k) + eyeOpen * k;
-                }
+                self.dictParams["Param2"] = 0;
+                self.dictParams["Param3"] = 0;
             }
-
 
             lipSyncLoop();
             updateModelPosition();
@@ -389,7 +449,7 @@ export default class Live2dController {
 
         // this.killerTimeoutId = setTimeout(() => {
         //     // clearInterval(self.faceParamExpressionLoopId);
-            
+        //     
         //     // reset model state
         // }, duration);
     }
