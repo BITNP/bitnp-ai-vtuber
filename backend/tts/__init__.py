@@ -52,48 +52,82 @@ async def get_tts_wav(text: str, speaker_name: str) -> bytes:
     if is_nonsense(text):
         return b""
     
-    # iterator = genie.tts_async(
+
+    # # sync
+    # genie.tts(
     #     character_name=speaker_name,
     #     text=text,
     #     play=False, # 不允许播放
     #     split_sentence=False,
-    #     # save_path=None
+    #     save_path='./temp.wav'
     # )
+    # with open('./temp.wav', 'rb') as f:
+    #     wav_data = f.read()
+    # return wav_data
 
-    genie.tts(
+    # async
+    iterator = genie.tts_async(
         character_name=speaker_name,
         text=text,
         play=False, # 不允许播放
         split_sentence=False,
-        save_path='./temp.wav'
+        # save_path=None
     )
 
-    # 1. 读取生成的WAV文件
-    with open('./temp.wav', 'rb') as f:
-        wav_data = f.read()
 
-    # # breakpoint()
+    # breakpoint()
 
-    # audio_chunks = []
-    # async for chunk in iterator:
-    #     audio_chunk = np.frombuffer(chunk, dtype=np.int16)
-    #     audio_chunks.append(audio_chunk)
+    audio_chunks = []
+    async for chunk in iterator:
+        audio_chunk = np.frombuffer(chunk, dtype=np.int16)
+        audio_chunks.append(audio_chunk)
 
-    # combined_audio = np.concatenate(audio_chunks)
+    combined_audio = np.concatenate(audio_chunks)
+
+    sample_rate = 32000 # 32kHz
+    target_silence_ms = 200 # 目标静音长度（毫秒）
+
+    if not audio_chunks:
+        target_samples = int(sample_rate * target_silence_ms / 1000)
+        final_audio = np.zeros(target_samples, dtype=np.int16)
+    else:
+        combined_audio = np.concatenate(audio_chunks)
+        
+        # 从后向前找到第一个非零值（简单静音检测）
+        # 找到绝对值大于10的最后一个样本的位置
+        non_silent_indices = np.where(np.abs(combined_audio) > 10)[0]
+        
+        if len(non_silent_indices) == 0:
+            # 整个音频都是静音
+            audio_end = 0
+        else:
+            audio_end = non_silent_indices[-1] + 1  # 最后一个有声音的索引+1
+        
+        # 计算需要添加的静音
+        target_samples = int(sample_rate * target_silence_ms / 1000)
+        current_samples_after_end = len(combined_audio) - audio_end
+        
+        if current_samples_after_end >= target_samples:
+            # 如果已有足够静音，截取到音频结束+目标静音长度
+            final_audio = combined_audio[:audio_end + target_samples]
+        else:
+            # 如果静音不足，添加静音
+            samples_to_add = target_samples - current_samples_after_end
+            silence_to_add = np.zeros(samples_to_add, dtype=np.int16)
+            final_audio = np.concatenate([combined_audio[:audio_end + current_samples_after_end], silence_to_add])
     
-    # # 2. 创建WAV文件二进制数据
-    # # 使用BytesIO作为内存文件
-    # wav_bytesio = io.BytesIO()
-    # sample_rate = 32000 # 32kHz
-    
-    # with wave.open(wav_bytesio, 'wb') as wav_file:
-    #     # 设置WAV参数
-    #     wav_file.setnchannels(1)  # 单声道
-    #     wav_file.setsampwidth(2)   # 16位 = 2字节
-    #     wav_file.setframerate(sample_rate)
-    #     wav_file.writeframes(combined_audio.tobytes())
 
-    # wav_bytesio = wav_bytesio.getvalue()
+    # 2. 创建WAV文件二进制数据
+    # 使用BytesIO作为内存文件
+    wav_bytesio = io.BytesIO()
     
-    # return wav_bytesio
-    return wav_data
+    with wave.open(wav_bytesio, 'wb') as wav_file:
+        # 设置WAV参数
+        wav_file.setnchannels(1)  # 单声道
+        wav_file.setsampwidth(2)   # 16位 = 2字节
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(final_audio.tobytes())
+
+    wav_bytesio = wav_bytesio.getvalue()
+    
+    return wav_bytesio

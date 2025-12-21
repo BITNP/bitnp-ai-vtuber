@@ -22,18 +22,10 @@ llm_api_config = LLM_Config(
 )
 
 tts_config = TTS_Config(
-    # onnx_model_dir = "./tts/pretrained/CharacterModels/v2ProPlus/mika/tts_models",
-    # onnx_model_dir = "./tts/pretrained/CharacterModels/v2ProPlus/feibi/tts_models",
-    # onnx_model_dir = "/Users/indexerror/Documents/MyStuff/Projects/Playground/Genie/test/onnx_output",
-
     onnx_model_dir = os.path.join(curr_dir, "tts/pretrained/IndexError/gptsovits-v2proplus-genie-onnx-export"),
     language = "hybrid-zh-en",
     ref_audio_path = os.path.join(curr_dir, "tts/ref_audio/paimeng.wav"),
     ref_audio_text = "蒙德有很多风车呢。回答正确！蒙德四季风吹不断，所以水源的供应也很稳定。",
-
-    # ref_audio_path = "./tts/pretrained/CharacterModels/v2ProPlus/feibi/prompt_wav/zh_vo_Main_Linaxita_2_1_10_26.wav",
-    # ref_audio_text = "在此之前，请您务必继续享受旅居拉古娜的时光。",
-
     ref_audio_language = "zh"
 )
 

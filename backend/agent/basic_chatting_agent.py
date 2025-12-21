@@ -121,12 +121,9 @@ class BasicChattingAgent(Agent):
         """
         print("generating tts:", text)
         wav_data = await get_tts_wav(text=text, speaker_name=self.agent_name)
-        # wav_data = b""
-        # for chunk in wav_generator:
-        #     if chunk:
-        #         wav_data += chunk
 
         try:
+            assert wav_data, "wav_data is empty"
             base64_wav_data = base64.b64encode(wav_data).decode("utf-8")
             return base64_wav_data
         except Exception as e:

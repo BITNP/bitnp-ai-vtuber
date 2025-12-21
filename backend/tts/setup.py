@@ -42,8 +42,6 @@ genie_models = [
 
 pretrained_repo_id = "IndexError/gptsovits-v2proplus-genie-onnx-export"
 
-# 下载 genie 提供的 mika 预设模型 (暂时使用该模型)
-# TODO: 使用自己的预训练模型
 print("========== Step 2/2: Downloading pretrained models... ==========")
 download_models_hf(genie_repo_id, genie_models, model_dir)
 snapshot_download_modelscope(pretrained_repo_id, cache_dir=model_dir)
