@@ -295,7 +295,7 @@ export default class Live2dController {
             } catch (e) {
                 console.error("Error in lipSyncLoop:", e);
             }
-            requestAnimationFrame(lipSyncLoop);
+            // requestAnimationFrame(lipSyncLoop); // ?
         }
         // lipSyncLoop();
 
@@ -352,7 +352,7 @@ export default class Live2dController {
                 self.dictParams["Param3"] = 0;
             }
 
-            lipSyncLoop();
+            lipSyncLoop(); // ?
             updateModelPosition();
 
             // 处理模型更新

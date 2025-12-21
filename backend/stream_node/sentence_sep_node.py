@@ -5,7 +5,7 @@ import re
 from .absctract_stream_node import StreamNode
 
 class SentenceSepNode(StreamNode):
-    def __init__(self, seps: str = ',.:;?! ，。：；？！', keep_seps: bool = True):
+    def __init__(self, seps: str = ',.:;?!，。：；？！\n', keep_seps: bool = True):
         super().__init__()
         self.seps = seps
         self.keep_seps = keep_seps

@@ -38,13 +38,13 @@ class LLM_Config(CompatibaleModel):
 
 class TTS_Config(CompatibaleModel):
     """
-    Config for GPT-SoVITS v1
+    Config for Genie-TTS
     """
-    gpt_weights_path: str
-    sovits_weights_path: str
-    ref_wav_path: str
-    prompt_text: str
-    prompt_language: str
+    onnx_model_dir: str
+    language: str
+    ref_audio_path: str
+    ref_audio_text: str
+    ref_audio_language: str
 
 class AgentConfig(CompatibaleModel):
     """

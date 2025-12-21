@@ -1,9 +1,11 @@
-import json
 from typing import List, Optional, Dict, Any
 from sseclient import SSEClient
-import requests
 from .abstract_bot import AbstractBot
+
+import json
+import requests
 import asyncio
+import traceback
 
 class GlmBot(AbstractBot):
     """
@@ -35,6 +37,7 @@ class GlmBot(AbstractBot):
     async def respond_to_context(self, messages: Optional[List[Dict]] = None) -> str:
         """Send messages to GLM-4 API and stream the response"""
         
+        await self._dispatch_event('start_of_response')
 
         if not messages:
             messages = self.messages
@@ -75,27 +78,29 @@ class GlmBot(AbstractBot):
             
             for event in client.events():
                 if event.data == '[DONE]':
-                    await self._dispatch_event('done')
+                    await self._dispatch_event('done', {'content': self.response})
                     return self.response
                 
-                try:
-                    event_data = json.loads(event.data)
-                    delta_text = event_data.get('choices', [{}])[0].get('delta', {}).get('content', '')
-                    
-                    if not delta_text or delta_text == 'undefined':
+                else:
+                    try:
+                        event_data = json.loads(event.data)
+                        delta_text = event_data.get('choices', [{}])[0].get('delta', {}).get('content', '')
+                        
+                        if not delta_text or delta_text == 'undefined':
+                            continue
+                        
+                        self.response += delta_text
+                        await self._dispatch_event('message_delta', {'content': delta_text})
+                        
+                    except json.JSONDecodeError as e:
+                        print(f'[GlmBot] An error occurred when parsing event data: {e}')
                         continue
-                    
-                    self.response += delta_text
-                    await self._dispatch_event('message_delta', {'content': delta_text})
-                    
-                except json.JSONDecodeError as e:
-                    print(f'[GlmBot] An error occurred when parsing event data: {e}')
-                    continue
 
         except requests.exceptions.RequestException as error:
-            print(f'Error sending message: {error}')
+            print(f'[GlmBot] Error sending message: {error}')
         except Exception as error:
-            print(f'Unexpected error: {error}')
+            traceback.print_exc()
+            print(f'[GlmBot] Unexpected error: {error}')
 
-        await self._dispatch_event('done')
+        await self._dispatch_event('done', {'content': self.response})
         return self.response

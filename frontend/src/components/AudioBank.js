@@ -137,9 +137,16 @@ export default class AudioBank extends EventTarget {
 
             try {
                 audio.load();
-                audio.play();
+                audio.play().catch((e) => {
+                    console.warn("Audio play failed!", e);
+                    this.currAudioId = null;
+                    reject(e);
+                });
+                console.log({audio})
             } catch(e) {
-                console.warn(e);
+                this.currAudioId = null;
+                reject(e);
+                return;
             }
             audio.addEventListener('ended', async () => {
                 this.currAudioId = null;

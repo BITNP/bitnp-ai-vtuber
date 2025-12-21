@@ -55,10 +55,11 @@ class BasicChattingAgent(Agent):
             """
             Handle user input event
             """
+            interrupted = False
 
             if self._curr_task:
                 # print("[interrupted!]") # DEBUG
-                self.interrupt()
+                interrupted = self.interrupt()
 
             self._curr_agent_response = ""
 
@@ -68,6 +69,9 @@ class BasicChattingAgent(Agent):
                 if is_empty(content):
                     return
                 
+                if interrupted:
+                    content = "(打断了你) " + content
+
                 # 调用 LLM API 处理用户输入
                 self.llm.append_context(content, "user")
                 res = await self.llm.respond_to_context()
@@ -80,6 +84,10 @@ class BasicChattingAgent(Agent):
         # async def test_loop(self: 'BasicChattingAgent'):
         #     print("test_loop")
 
+        @self.llm.on("start_of_response")
+        async def handle_start_of_response(data):
+            await self.emit({"type": "start_of_response"})
+
         @self.llm.on("message_delta")
         async def handle_message_delta(data):
             await asyncio.sleep(0.1) # check point (to check if the conversation is interrupted)
@@ -87,31 +95,43 @@ class BasicChattingAgent(Agent):
         
         @self.llm.on("done")
         async def handle_done(data):
+            self.llm.messages.append({"role": "assistant", "content": data["content"]})
             await self.sentence_sep_node.handle(" ")
+            await self.emit({"type": "end_of_response", "response": data["content"]})
     
     def interrupt(self):
         """
         Interrupt the current task
         """
+        should_interrupt = False
+
         if self._curr_task:
             self._curr_task.cancel()
             self._curr_task = None
             if len(self.llm.messages) > 0 and self.llm.messages[-1].get("role") != "assistant":
-                self.llm.append_context(f"{self._curr_agent_response} ... (被打断)", role="assistant")
+                self.llm.messages.insert(-1, {"role": "assistant", "content": f"{self._curr_agent_response}"})
+                should_interrupt = True
             self.sentence_sep_node.reset()
+
+        return should_interrupt
     
-    async def generate_tts_base64(self, text: str, text_language: str):
+    async def generate_tts_base64(self, text: str):
         """
         Generate TTS base64 audio data
         """
         print("generating tts:", text)
-        wav_generator = get_tts_wav(text=text, text_language=text_language, spk=self.agent_name)
-        wav_data = b""
-        for chunk in wav_generator:
-            if chunk:
-                wav_data += chunk
-        base64_wav_data = base64.b64encode(wav_data).decode("utf-8")
-        return base64_wav_data
+        wav_data = await get_tts_wav(text=text, speaker_name=self.agent_name)
+        # wav_data = b""
+        # for chunk in wav_generator:
+        #     if chunk:
+        #         wav_data += chunk
+
+        try:
+            base64_wav_data = base64.b64encode(wav_data).decode("utf-8")
+            return base64_wav_data
+        except Exception as e:
+            print(f"Error encoding wav to base64: {e}")
+            return ""
         
     async def handle_event(self, data: dict):
         """
@@ -124,7 +144,7 @@ class BasicChattingAgent(Agent):
 
         if data_type == "text":
             self._curr_agent_response += content
-            media_data = await self.generate_tts_base64(text=content, text_language="zh")
+            media_data = await self.generate_tts_base64(text=content)
             await self.emit({"type": "say_aloud", "content": content, "media_data": media_data})
         elif data_type == "tag":
             self._curr_agent_response += f"[{content}]"

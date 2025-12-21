@@ -9,7 +9,9 @@
             <!-- <button @click="switchMicrophoneMode">{{ (microphoneOn) ? '闭麦' : '开麦' }}</button> -->
         </div>
 
-        <div class="logo-background"></div>
+        <!-- <div class="logo-background"></div> -->
+
+        <div ref="pptContainer" class="ppt-container"></div>
 
         <audio ref="audioPlayer" src="" hidden></audio>
 
@@ -38,7 +40,7 @@
         </div>
 
 
-        <div ref="subtitleContainer" class="subtitle-container">
+        <div ref="subtitleContainer" :class="['subtitle-container', { 'subtitle-container-hidden': subtitleHidden }]">
             <div> <!-- placeholder --> </div>
             <div ref="subtitleInnerContainer" class="subtitle-inner-container">
                 <Subtitle ref="subtitle" class="subtitle-text" />
@@ -90,6 +92,8 @@ export default {
             microphoneOn: false,
             debug: false,
             audioEnabled: false, // The user needs to interact with the page (by clicking the button) to enable audio
+
+            subtitleHidden: true,
 
             imageSrc: "",
             inputText: "",
@@ -160,10 +164,47 @@ export default {
             });
             console.log(`Add text: ${message}`);
         },
+
+        showSubtitle() {
+            const subtitle = this.$refs.subtitle;
+            subtitle.clear();
+
+            this.subtitleHidden = false;
+
+            setTimeout(() => {
+                subtitle.enable = true;
+            }, 1000)
+        },
+
+        hideSubtitle() {
+            const subtitle = this.$refs.subtitle;
+            this.subtitleHidden = true;
+        },
+
+        setPPT(pptId) {
+            console.log('setPPT', pptId);
+            // const imagePath = require(`@/assets/ppt/${pptId}.png`);
+            // this.$refs.pptContainer.style.backgroundImage = `url(${imagePath})`;
+            // this.$refs.pptContainer.style.backgroundSize = 'cover';
+            // this.$refs.pptContainer.style.backgroundPosition = 'center';
+            import(`@/assets/ppt/${pptId}.png`)
+            .then(imageModule => {
+                if (this.$refs.pptContainer) {
+                    const imageUrl = imageModule.default || imageModule;
+                    this.$refs.pptContainer.style.backgroundImage = `url(${imageUrl})`;
+                    this.$refs.pptContainer.style.backgroundSize = 'cover';
+                    this.$refs.pptContainer.style.backgroundPosition = 'center';
+                }
+            })
+        }
     },
 
     mounted() {
         // shumeiniang Live2d controller
+
+        this.setPPT(1); // ppt init
+
+        const self = this;
         const config = LIVE2D_CONFIG;
         config.canvas = this.$refs.mainCanvas;
         console.log(config)
@@ -209,13 +250,26 @@ export default {
 
             // play audio
             const mediaId = message["media_id"];
-            await audioBank.play(mediaId);
+
+            try {
+                await audioBank.play(mediaId);
+            } catch (error) {
+                console.error("Error playing audio:", error);
+            }
+            
         }
 
         async function handleBracketTag(message) {
             // TOOD
             live2dController.setExpression(message.content);
+
+            if (message.content.startsWith("ppt_") || message.content.startsWith("PPT_")) {
+                const pptId = message.content.split("_")[1];
+                self.setPPT(pptId);
+            }
         }
+
+        let in_response = false;
 
         async function processEventQueue() {
             try {
@@ -233,7 +287,22 @@ export default {
                     await handleSayAloud(message);
                 } else if (message.type === "bracket_tag") {
                     await handleBracketTag(message);
+                } else if (message.type === "start_of_response") {
+                    // start of response
+                    self.showSubtitle();
+                    in_response = true;
+                } else if (message.type === "end_of_response") {
+                    // end of response
+                    in_response = false;
+                    console.log("end of response", message.response);
+                    setInterval(() => {
+                        if (!in_response) {
+                            self.hideSubtitle();
+                        }
+                    }, 1000);
                 }
+
+
             } catch (error) {
                 console.error("Error processing event:", error);
             }
@@ -241,24 +310,27 @@ export default {
         }
         processEventQueue();
 
-        this.$refs.inputArea.addEventListener("keydown", (e) => {
-            if (e.key === "Enter") {
-                // 清空事件队列
-                while (eventQueue.length > 0) {
-                    eventQueue.shift();
+        if (this.$refs.inputArea) {
+            this.$refs.inputArea.addEventListener("keydown", (e) => {
+                if (e.key === "Enter") {
+                    // 清空事件队列
+                    while (eventQueue.length > 0) {
+                        eventQueue.shift();
+                    }
+                    audioBank.clear();
+                    this.recordChat(this.inputText);
+                    this.inputText = "";
                 }
-                audioBank.clear();
-                this.recordChat(this.inputText);
-                this.inputText = "";
-            }
-        });
-
+            });
+        }
+        
 
         // subtitle scroll
         const subtitleInnerContainer = this.$refs.subtitleInnerContainer;
 
         const scrollToBottomLoop = () => {
             // loop scroll subtitleInnerContainer to bottom (in smooth behavior)
+            console.log("[DEBUG] scroll to bottom loop")
             const currentScrollTop = subtitleInnerContainer.scrollTop + subtitleInnerContainer.clientHeight;
             const targetScrollTop = subtitleInnerContainer.scrollHeight;
             if (currentScrollTop < targetScrollTop) {
@@ -267,7 +339,7 @@ export default {
                     behavior: "smooth",
                 });
             }
-            requestAnimationFrame(scrollToBottomLoop);
+            setTimeout(() => scrollToBottomLoop(), 500);
         }
         scrollToBottomLoop();
     },
@@ -286,6 +358,17 @@ export default {
     -moz-osx-font-smoothing: grayscale;
     text-align: center;
     color: #2c3e50;
+
+    perspective: 1000px;
+}
+
+.ppt-container {
+    position: fixed;
+    width: 80vw;
+    aspect-ratio: 16 / 9;
+    margin: 20px;
+
+    /*background: yellow;*/
 }
 
 .danmuku-area {
@@ -325,10 +408,10 @@ export default {
     position: fixed;
     margin: 0;
     padding: 0;
-    width: 100vw; /* modified */
-    height: 100vh;
-    left: 0;
-    top: 0;
+    width: 25vw; /* modified */
+    height: 80vh;
+    right: 0;
+    bottom: 0;
 }
 
 .canvas {
@@ -416,9 +499,9 @@ export default {
 
 .subtitle-container-hidden {
     opacity: 0;
-    transform: rotateY(20deg) rotateX(90deg) translate(0, 0);
-    transition: opacity 0.5s ease, transform 0.5s ease;
-    animation: subtitle-hide 0.5s ease-out;
+    transform: rotateX(90deg) translate(0, 0) scale(0.8);
+    transition: opacity 0.8s ease, transform 0.8s ease;
+    /* animation: subtitle-hide 0.5s ease-out; */
 }
 
 .subtitle-inner-container {
@@ -434,7 +517,7 @@ export default {
 }
 
 .subtitle-text {
-    font-size: 2em;
+    font-size: 3rem;
     font-weight: 500;
     user-select: none;
     color: rgb(0, 0, 0);
