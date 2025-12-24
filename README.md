@@ -38,7 +38,7 @@ git clone git@git.bitnp.net:project-shumeiniang/bitnp-ai-vtuber.git
 ``` shell
 cd frontend
 pnpm install
-cd frontend/public/Resources
+cd public/Resources
 git clone git@git.bitnp.net:project-shumeiniang/daver3.0.git
 mv daver3.0 DAver3.0
 ```
@@ -53,9 +53,9 @@ mv daver3.0 DAver3.0
 ``` shell
 cd backend
 uv sync
-uv run tts/get_pretrained.py
+uv run tts/setup.py
 ```
-解释：先用uv sync安装依赖, 再运行get_pretrained.py下载预训练模型
+解释：先用uv sync安装依赖, 再运行setup.py下载预训练模型
 
 ---
 
