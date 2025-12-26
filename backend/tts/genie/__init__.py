@@ -1,0 +1,1 @@
+from .compatible_api import GenieTTS

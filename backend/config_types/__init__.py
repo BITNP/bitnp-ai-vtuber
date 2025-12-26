@@ -1,6 +1,6 @@
 # config classes
 from pydantic import BaseModel, ConfigDict
-from typing import Iterator, Tuple, Any
+from typing import Iterator, Tuple, Any, Union
 
 class CompatibaleModel(BaseModel):
     """support dict-like access & extra fields"""
@@ -36,15 +36,27 @@ class LLM_Config(CompatibaleModel):
     system_prompt: str
     max_context_length: int
 
-class TTS_Config(CompatibaleModel):
+class Genie_TTS_Config(CompatibaleModel):
     """
     Config for Genie-TTS
     """
+    tts_method_name: str = "genie"
     onnx_model_dir: str
     language: str
     ref_audio_path: str
     ref_audio_text: str
     ref_audio_language: str
+
+class Dashscope_TTS_Config(CompatibaleModel):
+    """
+    Config for Dashscope TTS
+    """
+    tts_method_name: str = "dashscope"
+    api_key: str
+    model: str
+    voice: str
+
+TTS_Config = Union[Genie_TTS_Config, Dashscope_TTS_Config]
 
 class AgentConfig(CompatibaleModel):
     """
@@ -53,3 +65,4 @@ class AgentConfig(CompatibaleModel):
     server_url: str
     agent_name: str
     llm_api_config: LLM_Config
+    tts_stream: bool = False

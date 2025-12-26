@@ -11,14 +11,13 @@ import websockets
 import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from llm_api import create_bot
 
 BotConfig = dict[Union[Literal["api_name"], str], str]
 TimeStampISO = str
 EventData = dict
 
 class Agent:
-    def __init__(self, server_url: str, agent_name: str, llm_api_config: BotConfig = None):
+    def __init__(self, server_url: str, agent_name: str):
 
         # ensure the server_url is a valid websocket url
         if not (server_url.startswith("ws://") or server_url.startswith("wss://")):
@@ -33,7 +32,6 @@ class Agent:
 
         self.server_url = server_url
         self.agent_name = agent_name
-        self.llm = create_bot(**llm_api_config) if llm_api_config else None
 
         self._event_handlers: dict[str, list[Callable[['Agent', TimeStampISO, EventData], None]]] = {}
         self.ws = None

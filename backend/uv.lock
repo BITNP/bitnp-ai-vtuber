@@ -413,6 +413,7 @@ dependencies = [
     { name = "chardet" },
     { name = "cn2an" },
     { name = "ctranslate2" },
+    { name = "dashscope" },
     { name = "fast-langdetect" },
     { name = "fastapi", extra = ["standard"] },
     { name = "ffmpeg-python" },
@@ -470,6 +471,7 @@ requires-dist = [
     { name = "chardet", specifier = ">=5.2.0" },
     { name = "cn2an", specifier = ">=0.5.23" },
     { name = "ctranslate2", specifier = ">=4.0,<5" },
+    { name = "dashscope", specifier = ">=1.25.5" },
     { name = "fast-langdetect", specifier = ">=1.0.0" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.115.2" },
     { name = "ffmpeg-python", specifier = ">=0.2.0" },
@@ -1059,6 +1061,21 @@ source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
 sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/a9/95/a3dbbb5028f35eafb79008e7522a75244477d2838f38cbb722248dabc2a8/cycler-0.12.1.tar.gz", hash = "sha256:88bb128f02ba341da8ef447245a9e138fae777f6a23943da4540077d3601eb1c" }
 wheels = [
     { url = "https://pypi.tuna.tsinghua.edu.cn/packages/e7/05/c19819d5e3d95294a6f5947fb9b9629efb316b96de511b418c53d245aae6/cycler-0.12.1-py3-none-any.whl", hash = "sha256:85cef7cff222d8644161529808465972e51340599459b8ac3ccbac5a854e0d30" },
+]
+
+[[package]]
+name = "dashscope"
+version = "1.25.5"
+source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "certifi" },
+    { name = "cryptography" },
+    { name = "requests" },
+    { name = "websocket-client" },
+]
+wheels = [
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/c5/91/60f5353c8752d8ce489f4baeb252999d4cfb1a784c0beda34b5287135d65/dashscope-1.25.5-py3-none-any.whl", hash = "sha256:1be9eebaf1e7327317a22db9233770f4252463b926c84071ffd8805ae06cf998", size = 1323186, upload-time = "2025-12-18T02:15:26.462Z" },
 ]
 
 [[package]]
@@ -5814,6 +5831,15 @@ wheels = [
     { url = "https://pypi.tuna.tsinghua.edu.cn/packages/bd/95/615e72cd27b85b61eec764a5ca51bd94d40b5adea5ff47567d9ebc4d275a/watchfiles-1.1.1-pp311-pypy311_pp73-macosx_11_0_arm64.whl", hash = "sha256:89eef07eee5e9d1fda06e38822ad167a044153457e6fd997f8a858ab7564a336", size = 396117, upload-time = "2025-10-14T15:06:11.28Z" },
     { url = "https://pypi.tuna.tsinghua.edu.cn/packages/c9/81/e7fe958ce8a7fb5c73cc9fb07f5aeaf755e6aa72498c57d760af760c91f8/watchfiles-1.1.1-pp311-pypy311_pp73-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:ce19e06cbda693e9e7686358af9cd6f5d61312ab8b00488bc36f5aabbaf77e24", size = 450493, upload-time = "2025-10-14T15:06:12.321Z" },
     { url = "https://pypi.tuna.tsinghua.edu.cn/packages/6e/d4/ed38dd3b1767193de971e694aa544356e63353c33a85d948166b5ff58b9e/watchfiles-1.1.1-pp311-pypy311_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:3e6f39af2eab0118338902798b5aa6664f46ff66bc0280de76fca67a7f262a49", size = 457546, upload-time = "2025-10-14T15:06:13.372Z" },
+]
+
+[[package]]
+name = "websocket-client"
+version = "1.9.0"
+source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/2c/41/aa4bf9664e4cda14c3b39865b12251e8e7d239f4cd0e3cc1b6c2ccde25c1/websocket_client-1.9.0.tar.gz", hash = "sha256:9e813624b6eb619999a97dc7958469217c3176312b3a16a4bd1bc7e08a46ec98", size = 70576, upload-time = "2025-10-07T21:16:36.495Z" }
+wheels = [
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/34/db/b10e48aa8fff7407e67470363eac595018441cf32d5e1001567a7aeba5d2/websocket_client-1.9.0-py3-none-any.whl", hash = "sha256:af248a825037ef591efbf6ed20cc5faa03d3b47b9e5a2230a529eeee1c1fc3ef", size = 82616, upload-time = "2025-10-07T21:16:34.951Z" },
 ]
 
 [[package]]

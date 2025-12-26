@@ -1,7 +1,7 @@
 """
 Basic chatting agent
 """
-from .abstract_agent import Agent, BotConfig, EventData
+from .abstract_agent import Agent, EventData
 
 import base64
 import asyncio
@@ -10,28 +10,27 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from stream_node import SentenceSepNode, BracketsParsorNode, LambdaNode
-from tts import define_speaker, get_tts_wav
-from typing import TypedDict
+from llm_api import create_bot
+from tts import create_tts
+from tts.pcm2wav import pcm2wav
 
-TTS_Config = TypedDict("TTS_Config", {
-    "gpt_weights_path": str,
-    "sovits_weights_path": str,
-    "ref_wav_path": str,
-    "prompt_text": str,
-    "prompt_language": str,
-})
+from config_types import LLM_Config, TTS_Config
 
 def is_empty(content: str) -> bool:
     return not content.strip()
 
 class BasicChattingAgent(Agent):
-    def __init__(self, server_url: str, agent_name: str, llm_api_config: BotConfig, tts_config: TTS_Config):
-        super().__init__(server_url, agent_name, llm_api_config)
+    def __init__(self, server_url: str, agent_name: str, llm_api_config: LLM_Config, tts_config: TTS_Config, tts_stream: bool = False):
+        super().__init__(server_url, agent_name)
 
-        define_speaker(name=agent_name, **tts_config)
+        self.llm = create_bot(**llm_api_config)
+        self.tts = create_tts(**tts_config)
+
+        self.tts_stream = tts_stream
 
         # streaming workflow: sentence_sep -> brackets_parsor -> event_emitter
-        self.sentence_sep_node = SentenceSepNode()
+        # self.sentence_sep_node = SentenceSepNode(seps = "',.:;?!，。：；？！\n")
+        self.sentence_sep_node = SentenceSepNode(seps = "'.:;?!。：；？！\n") # ignore comma
         self.brackets_parsor_node = BracketsParsorNode()
 
         async def event_emitter_lambda(_, data):
@@ -115,20 +114,20 @@ class BasicChattingAgent(Agent):
 
         return should_interrupt
     
-    async def generate_tts_base64(self, text: str):
-        """
-        Generate TTS base64 audio data
-        """
-        print("generating tts:", text)
-        wav_data = await get_tts_wav(text=text, speaker_name=self.agent_name)
+    # async def generate_tts_base64(self, text: str):
+    #     """
+    #     Generate TTS base64 audio data
+    #     """
+    #     print("generating tts:", text)
+    #     wav_data = await get_tts_wav(text=text, speaker_name=self.agent_name)
 
-        try:
-            assert wav_data, "wav_data is empty"
-            base64_wav_data = base64.b64encode(wav_data).decode("utf-8")
-            return base64_wav_data
-        except Exception as e:
-            print(f"Error encoding wav to base64: {e}")
-            return ""
+    #     try:
+    #         assert wav_data, "wav_data is empty"
+    #         base64_wav_data = base64.b64encode(wav_data).decode("utf-8")
+    #         return base64_wav_data
+    #     except Exception as e:
+    #         print(f"Error encoding wav to base64: {e}")
+    #         return ""
         
     async def handle_event(self, data: dict):
         """
@@ -141,8 +140,28 @@ class BasicChattingAgent(Agent):
 
         if data_type == "text":
             self._curr_agent_response += content
-            media_data = await self.generate_tts_base64(text=content)
-            await self.emit({"type": "say_aloud", "content": content, "media_data": media_data})
+
+            # TTS
+            if self.tts_stream:
+                first_pack = True
+                async for media_data in self.tts.synthesize_stream(content):
+                    if self.tts.format == "pcm":
+                        media_data = pcm2wav(media_data, sample_rate=self.tts.sample_rate, channels=self.tts.channels, bits_per_sample=self.tts.bits_per_sample)
+                    base64_data = base64.b64encode(media_data).decode("utf-8")
+
+                    if first_pack:
+                        first_pack = False
+                        display_text = content
+                    else:
+                        display_text = ""
+
+                    await self.emit({"type": "say_aloud", "content": display_text, "media_data": base64_data, "format": self.tts.format})
+            else:
+                media_data = await self.tts.synthesize(content)
+                if self.tts.format == "pcm":
+                    media_data = pcm2wav(media_data, sample_rate=self.tts.sample_rate, channels=self.tts.channels, bits_per_sample=self.tts.bits_per_sample)
+                base64_data = base64.b64encode(media_data).decode("utf-8")
+                await self.emit({"type": "say_aloud", "content": content, "media_data": base64_data, "format": self.tts.format})
         elif data_type == "tag":
             self._curr_agent_response += f"[{content}]"
             await self.emit({"type": "bracket_tag", "content": content})
