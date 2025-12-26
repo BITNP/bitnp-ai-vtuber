@@ -17,6 +17,15 @@ PCM_Format = Literal['pcm']
 URL = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
 DEFAULT_TARGET_MODEL = "qwen3-tts-vc-realtime-2025-11-27"
 
+
+def is_nonsense(text: str):
+    """
+    Check if the text is nonsense
+    """
+    punctuation = ("，。！？、 \n,.!?\"'‘’“”：【】「」{}[]@#$%^&*()（）-=+——|｜\t\r\\"
+                  "：；，。.！!？?\n.·、$./—-~…～…")
+    return text.strip() == "" or all(c in punctuation for c in text.strip())
+
 class DashscopeTTS(AbstractTTS):
     """
     Dashscope TTS
@@ -114,6 +123,13 @@ class DashscopeTTS(AbstractTTS):
             response_format=AudioFormat.PCM_24000HZ_MONO_16BIT,
             mode='server_commit'
         )
+        
+        # 检查文本是否为空
+        if is_nonsense(text):
+            print(f'[Warning] 文本为空或仅包含标点符号: {text}')
+            self.complete_event.set()
+            yield b''
+            return
         
         # 启动后台线程发送文本
         def send_texts():

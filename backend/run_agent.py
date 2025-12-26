@@ -40,7 +40,7 @@ agent_config = AgentConfig(
     agent_name = agent_name,
     llm_api_config = llm_api_config,
     tts_config = tts_config,
-    tts_stream = False,
+    tts_stream = True,
 )
 
 agent = create_agent(agent_type = 'basic_chatting_agent', **agent_config.model_dump())

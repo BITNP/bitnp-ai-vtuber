@@ -78,8 +78,8 @@
 import Live2dController from '@/live2d-controller/Live2dController';
 import LIVE2D_CONFIG from '@/agent-presets/shumeiniang/live2dConfig.js'
 import FrontendAgent from '@/ws-client/FrontendAgent';
-import AudioBank from '@/components/AudioBank';
 import Subtitle from '@/components/Subtitle.vue';
+import StreamAudioPlayer from '@/components/StreamAudioPlayer.js';
 
 export default {
     components: {
@@ -142,10 +142,12 @@ export default {
         },
 
         enableAudioActivities() {
-            if (!this.audioBank) {
-                return;
-            }
-            this.audioBank.handleUserGesture();
+            this.streamAudioPlayer.init();
+            this.streamAudioPlayer.startStream();
+            // if (!this.audioBank) {
+            //     return;
+            // }
+            // this.audioBank.handleUserGesture();
             this.audioEnabled = true;
         },
 
@@ -177,11 +179,14 @@ export default {
 
         this.wsClient = client;
 
-        const audioBank = new AudioBank();
-        this.audioBank = audioBank;
+        // const audioBank = new AudioBank();
+        // this.audioBank = audioBank;
+
+        const streamAudioPlayer = new StreamAudioPlayer();
+        this.streamAudioPlayer = streamAudioPlayer;
 
         live2dController.setLipSyncFunc(() => {
-            return audioBank.volume;
+            return streamAudioPlayer.volume;
         });
 
         const eventQueue = [];
@@ -191,8 +196,11 @@ export default {
                 const event = message.detail.data
                 const type = event.type;
                 if (type === "say_aloud") {
+                    if (!this.isStreaming) {
+                        streamAudioPlayer.startStream()
+                    }
                     const mediaData = event["media_data"];
-                    const id = audioBank.add(`data:audio/wav;base64,${mediaData}`); // base64 wav media data
+                    const id = streamAudioPlayer.addWavData(mediaData); // base64 wav media data
                     event["media_id"] = id;
                 }
             }
@@ -209,7 +217,7 @@ export default {
 
             // play audio
             const mediaId = message["media_id"];
-            await audioBank.play(mediaId);
+            // await audioBank.play(mediaId);
         }
 
         async function handleBracketTag(message) {
@@ -247,7 +255,7 @@ export default {
                 while (eventQueue.length > 0) {
                     eventQueue.shift();
                 }
-                audioBank.clear();
+                // audioBank.clear();
                 this.recordChat(this.inputText);
                 this.inputText = "";
             }
