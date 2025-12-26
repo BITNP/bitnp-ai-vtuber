@@ -199,16 +199,31 @@ export default class StreamAudioPlayer {
       
       // 添加到缓冲区
       this.appendAudioData(audioData);
-      
       this.mediaMap.set(mediaId, {
         data: audioData,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        endTime: this.getTotalDuration()
       });
       
       return mediaId;
     } catch (error) {
       console.error('Failed to add WAV data:', error);
       return -1;
+    }
+  }
+
+  async waitUntilFinish(mediaId) {
+    const mediaInfo = this.mediaMap.get(mediaId);
+    if (!mediaInfo) {
+      throw new Error('Media ID not found');
+    }
+
+    const endTime = mediaInfo.endTime;
+
+    console.log("[DEBUG] waiting media until finish:", mediaId, "curr_time", this.getCurrentTime(), "end_time", endTime);
+
+    while (this.getCurrentTime() < endTime) {
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
   }
 

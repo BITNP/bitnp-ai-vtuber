@@ -38,7 +38,7 @@
         </div>
 
 
-        <div ref="subtitleContainer" class="subtitle-container">
+        <div ref="subtitleContainer" :class="['subtitle-container', { 'subtitle-container-hidden': subtitleHidden }]">
             <div> <!-- placeholder --> </div>
             <div ref="subtitleInnerContainer" class="subtitle-inner-container">
                 <Subtitle ref="subtitle" class="subtitle-text" />
@@ -93,6 +93,7 @@ export default {
 
             imageSrc: "",
             inputText: "",
+            subtitleHidden: true, // 是否隐藏字幕
 
             // app vars
             showConfigUI: false,
@@ -162,9 +163,28 @@ export default {
             });
             console.log(`Add text: ${message}`);
         },
+
+        showSubtitle() {
+            const subtitle = this.$refs.subtitle;
+            subtitle.clear();
+
+            this.subtitleHidden = false;
+
+            setTimeout(() => {
+                subtitle.enable = true;
+            }, 1000)
+        },
+
+        hideSubtitle() {
+            const subtitle = this.$refs.subtitle;
+            this.subtitleHidden = true;
+        },
+
     },
 
     mounted() {
+        const self = this;
+
         // shumeiniang Live2d controller
         const config = LIVE2D_CONFIG;
         config.canvas = this.$refs.mainCanvas;
@@ -196,12 +216,14 @@ export default {
                 const event = message.detail.data
                 const type = event.type;
                 if (type === "say_aloud") {
-                    if (!this.isStreaming) {
+                    if (!streamAudioPlayer.isStreaming) {
                         streamAudioPlayer.startStream()
                     }
                     const mediaData = event["media_data"];
-                    const id = streamAudioPlayer.addWavData(mediaData); // base64 wav media data
-                    event["media_id"] = id;
+                    streamAudioPlayer.addWavData(mediaData)
+                    .then(id => {
+                        event["media_id"] = id;
+                    });
                 }
             }
 
@@ -217,13 +239,15 @@ export default {
 
             // play audio
             const mediaId = message["media_id"];
-            // await audioBank.play(mediaId);
+            await streamAudioPlayer.waitUntilFinish(mediaId);
         }
 
         async function handleBracketTag(message) {
             // TOOD
             live2dController.setExpression(message.content);
         }
+
+        let in_response = false;
 
         async function processEventQueue() {
             try {
@@ -241,6 +265,19 @@ export default {
                     await handleSayAloud(message);
                 } else if (message.type === "bracket_tag") {
                     await handleBracketTag(message);
+                } else if (message.type === "start_of_response") {
+                    // start of response
+                    self.showSubtitle();
+                    in_response = true;
+                } else if (message.type === "end_of_response") {
+                    // end of response
+                    in_response = false;
+                    console.log("end of response", message.response);
+                    setInterval(() => {
+                        if (!in_response) {
+                            self.hideSubtitle();
+                        }
+                    }, 1000);
                 }
             } catch (error) {
                 console.error("Error processing event:", error);

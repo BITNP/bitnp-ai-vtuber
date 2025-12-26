@@ -1,7 +1,4 @@
-import os
-import requests
 import base64
-import pathlib
 import threading
 import time
 import dashscope  # DashScope Python SDK 版本需要不低于1.23.9
@@ -10,13 +7,12 @@ import asyncio
 
 from dashscope.audio.qwen_tts_realtime import QwenTtsRealtime, QwenTtsRealtimeCallback, AudioFormat
 from ..abstract_tts import AbstractTTS
-from typing import Literal, AsyncGenerator, Callable, List
+from typing import Literal, AsyncGenerator, List
 
 PCM_Format = Literal['pcm']
 
 URL = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
 DEFAULT_TARGET_MODEL = "qwen3-tts-vc-realtime-2025-11-27"
-
 
 def is_nonsense(text: str):
     """
