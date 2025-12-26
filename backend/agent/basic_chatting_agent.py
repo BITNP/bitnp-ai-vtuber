@@ -155,13 +155,13 @@ class BasicChattingAgent(Agent):
                     else:
                         display_text = ""
 
-                    await self.emit({"type": "say_aloud", "content": display_text, "media_data": base64_data, "format": self.tts.format})
+                    await self.emit({"type": "say_aloud", "content": display_text, "media_data": base64_data, "format": "wav"})
             else:
                 media_data = await self.tts.synthesize(content)
                 if self.tts.format == "pcm":
                     media_data = pcm2wav(media_data, sample_rate=self.tts.sample_rate, channels=self.tts.channels, bits_per_sample=self.tts.bits_per_sample)
                 base64_data = base64.b64encode(media_data).decode("utf-8")
-                await self.emit({"type": "say_aloud", "content": content, "media_data": base64_data, "format": self.tts.format})
+                await self.emit({"type": "say_aloud", "content": content, "media_data": base64_data, "format": "wav"})
         elif data_type == "tag":
             self._curr_agent_response += f"[{content}]"
             await self.emit({"type": "bracket_tag", "content": content})

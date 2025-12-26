@@ -261,6 +261,10 @@ export default {
 
                 console.log("processing message from server:", message); // DEBUG
 
+                if (!message.type) {
+                    return;
+                }
+
                 if (message.type === "say_aloud") {
                     await handleSayAloud(message);
                 } else if (message.type === "bracket_tag") {
