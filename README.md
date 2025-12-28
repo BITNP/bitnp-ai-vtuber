@@ -25,7 +25,7 @@
 ## 3. 安装项目
 ### 3.1 克隆仓库
 ``` shell
-git clone git@git.bitnp.net:project-shumeiniang/bitnp-ai-vtuber.git
+git clone https://github.com/SiliconSiliconGrass/bitnp-ai-vtuber.git
 ```
 
 ### 3.2 安装依赖
@@ -48,14 +48,15 @@ mv daver3.0 DAver3.0
 > ⚠️ 请先确保已安装`uv`。  
 > 如未安装，请运行：  `pip install uv`
 
-运行以下命令
+
 
 ``` shell
 cd backend
 uv sync
-uv run tts/setup.py
 ```
-解释：先用uv sync安装依赖, 再运行setup.py下载预训练模型
+
+⚠️ 若使用本地 Genie 语音合成引擎，需要先运行 `uv run tts/genie/setup.py` 来下载相应模型。
+运行以下命令
 
 ---
 
