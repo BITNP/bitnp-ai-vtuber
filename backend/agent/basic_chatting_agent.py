@@ -89,14 +89,42 @@ class BasicChattingAgent(Agent):
 
         @self.llm.on("message_delta")
         async def handle_message_delta(data):
-            await asyncio.sleep(0.1) # check point (to check if the conversation is interrupted)
-            await self.sentence_sep_node.handle(data["content"])
+            content_chunk = data["content"]
+            
+            # 1. 首先检查PPT翻页指令 - 最高优先级，不等待任何操作
+            import re
+            pattern = r'\[(?:PPT_([0-9]+)|翻页:?\s*([0-9]+))\]'
+            matches = list(re.finditer(pattern, content_chunk))
+            
+            for match in matches:
+                page_num = int(match.group(1) if match.group(1) else match.group(2))
+                if 1 <= page_num <= 100:
+                    # 立即发送翻页事件，不等待任何其他操作
+                    await self.emit({"type": "flip_ppt_page", "page_num": page_num})
+            
+            # 2. 然后处理文本和TTS合成 - 低优先级，可延迟
+            await self.sentence_sep_node.handle(content_chunk)
         
         @self.llm.on("done")
         async def handle_done(data):
             self.llm.messages.append({"role": "assistant", "content": data["content"]})
             await self.sentence_sep_node.handle(" ")
             await self.emit({"type": "end_of_response", "response": data["content"]})
+            
+            # 检查AI回复中是否包含PPT翻页指令
+            response_content = data["content"]
+            import re
+            
+            # 匹配多种格式：
+            # 1. [PPT_2] (来自提示词的预期格式)
+            # 2. [翻页:1] 或 [翻页: 1] (旧格式)
+            pattern = r'\[(?:PPT_([0-9]+)|翻页:?\s*([0-9]+))\]'
+            match = re.search(pattern, response_content)
+            
+            if match:
+                # 获取匹配到的页码（从两个捕获组中取非None的那个）
+                page_num = int(match.group(1) if match.group(1) else match.group(2))
+                await self.emit({"type": "flip_ppt_page", "page_num": page_num})
     
     def interrupt(self):
         """
@@ -130,38 +158,41 @@ class BasicChattingAgent(Agent):
     #         return ""
         
     async def handle_event(self, data: dict):
-        """
-        Handle event
-        """
-        data_type = data.get("type", "")
-        content = data.get("content", "")
+            """
+            Handle event
+            """
+            data_type = data.get("type", "")
+            content = data.get("content", "")
 
-        await asyncio.sleep(0) # check point (to check if the conversation is interrupted)
+            await asyncio.sleep(0) # check point (to check if the conversation is interrupted)
 
-        if data_type == "text":
-            self._curr_agent_response += content
+            if data_type == "text":
+                self._curr_agent_response += content
 
-            # TTS
-            if self.tts_stream:
-                first_pack = True
-                async for media_data in self.tts.synthesize_stream(content):
-                    if self.tts.format == "pcm":
-                        media_data = pcm2wav(media_data, sample_rate=self.tts.sample_rate, channels=self.tts.channels, bits_per_sample=self.tts.bits_per_sample)
-                    base64_data = base64.b64encode(media_data).decode("utf-8")
+                # TTS合成 - 同步处理以确保字幕显示正确
+                try:
+                    if self.tts_stream:
+                        first_pack = True
+                        async for media_data in self.tts.synthesize_stream(content):
+                            if self.tts.format == "pcm":
+                                media_data = pcm2wav(media_data, sample_rate=self.tts.sample_rate, channels=self.tts.channels, bits_per_sample=self.tts.bits_per_sample)
+                            base64_data = base64.b64encode(media_data).decode("utf-8")
 
-                    if first_pack:
-                        first_pack = False
-                        display_text = content
+                            if first_pack:
+                                first_pack = False
+                                display_text = content
+                            else:
+                                display_text = ""
+
+                            await self.emit({"type": "say_aloud", "content": display_text, "media_data": base64_data, "format": "wav"})
                     else:
-                        display_text = ""
-
-                    await self.emit({"type": "say_aloud", "content": display_text, "media_data": base64_data, "format": "wav"})
-            else:
-                media_data = await self.tts.synthesize(content)
-                if self.tts.format == "pcm":
-                    media_data = pcm2wav(media_data, sample_rate=self.tts.sample_rate, channels=self.tts.channels, bits_per_sample=self.tts.bits_per_sample)
-                base64_data = base64.b64encode(media_data).decode("utf-8")
-                await self.emit({"type": "say_aloud", "content": content, "media_data": base64_data, "format": "wav"})
-        elif data_type == "tag":
-            self._curr_agent_response += f"[{content}]"
-            await self.emit({"type": "bracket_tag", "content": content})
+                        media_data = await self.tts.synthesize(content)
+                        if self.tts.format == "pcm":
+                            media_data = pcm2wav(media_data, sample_rate=self.tts.sample_rate, channels=self.tts.channels, bits_per_sample=self.tts.bits_per_sample)
+                        base64_data = base64.b64encode(media_data).decode("utf-8")
+                        await self.emit({"type": "say_aloud", "content": content, "media_data": base64_data, "format": "wav"})
+                except Exception as e:
+                    print(f"TTS合成出错: {e}")
+            elif data_type == "tag":
+                self._curr_agent_response += f"[{content}]"
+                await self.emit({"type": "bracket_tag", "content": content})
