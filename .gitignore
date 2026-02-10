@@ -40,3 +40,6 @@ coverage
 
 # Vitest
 __screenshots__/
+
+# ccls
+.ccls-cache/
