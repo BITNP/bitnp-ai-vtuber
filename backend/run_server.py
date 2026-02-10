@@ -7,6 +7,7 @@ A server for communication between frontend and agents (or between agents)
 """
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
 
@@ -15,6 +16,7 @@ import uvicorn
 import logging
 import uuid
 import argparse
+import os
 
 # 配置logging
 logging.basicConfig(
@@ -134,6 +136,18 @@ frontend_manager = ConnectionManager('frontend')
 
 # 存储已连接的智能体
 connected_agents: set[str] = set()
+
+
+def mount_ppt_assets(ppt_images_dir: str | None, mount_path: str = "/documents/slides"):
+    if not ppt_images_dir:
+        return
+    if not os.path.isdir(ppt_images_dir):
+        logger.warning(f"PPT images dir not found: {ppt_images_dir}")
+        return
+
+    mount_path = mount_path.rstrip("/")
+    app.mount(mount_path, StaticFiles(directory=ppt_images_dir), name="ppt-assets")
+    logger.info(f"Mounted PPT assets: {ppt_images_dir} -> {mount_path}")
 
 async def handle_agent_message(client_id: str, message_data: dict) -> dict | None:
     """处理智能体发送的消息"""
@@ -257,8 +271,12 @@ if __name__ == "__main__":
     # 解析命令行参数
     parser = argparse.ArgumentParser(description="BITNP AI VTuber backend")
     parser.add_argument("--port", type=int, default=8000, help="server port, defaults to 8000")
+    parser.add_argument("--ppt-images-dir", default=None, help="static dir for ppt images")
+    parser.add_argument("--ppt-mount-path", default="/documents/slides", help="mount path for ppt images")
     args = parser.parse_args()
 
     port = args.port
+
+    mount_ppt_assets(args.ppt_images_dir, args.ppt_mount_path)
 
     uvicorn.run(app, host="0.0.0.0", port=port)

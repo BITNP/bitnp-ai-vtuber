@@ -41,3 +41,21 @@
     3.*_scripts: 每页的讲解
     4.*_vision: 每页图片的视觉描述
     保存在PPT文件所在目录下自动创建的名为 generated_scripts 的文件夹，
+
+---
+
+## 讲稿驱动播放（lecture_agent）
+
+讲稿生成后，可直接用 `lecture_agent` 自动播讲并翻页：
+
+1. 准备讲稿与图片
+    - 讲稿文件：`generated_scripts/*_scripts.txt`
+    - PPT 图片目录：例如 `frontend/public/documents/slides`（图片文件名按页码排序）
+
+2. 启动后端服务器（托管 PPT 图片）
+    - `uv run run_server.py --ppt-images-dir <图片目录> --ppt-mount-path /documents/slides`
+
+3. 启动讲稿驱动 Agent
+    - `uv run run_agent.py --agent-type lecture_agent --lecture-script <*_scripts.txt 或 generated_scripts 目录> --ppt-images-dir <图片目录>`
+
+前端会收到 `ppt_assets` 事件并自动加载图片；讲稿播放会按 `[PPT_x]` 触发翻页。 

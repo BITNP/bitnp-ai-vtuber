@@ -45,6 +45,20 @@
                 <input type="checkbox" v-model="allowPauseDictation">
                 在 AI 说话时禁用语音识别
             </label><br>
+
+            <div class="lecture-controls">
+                <h2>讲稿控制</h2>
+                <div class="lecture-buttons">
+                    <button @click="toggleLecturePause">{{ lecturePaused ? '继续' : '暂停' }}</button>
+                    <button @click="sendLectureControl('prev')">上一页</button>
+                    <button @click="sendLectureControl('next')">下一页</button>
+                    <button @click="sendLectureControl('replay')">重播当前页</button>
+                </div>
+                <div class="lecture-goto">
+                    <input type="number" v-model="lectureControlPage" placeholder="页码" min="1">
+                    <button @click="gotoLecturePage">跳转</button>
+                </div>
+            </div>
             
         </div>
 
@@ -110,6 +124,10 @@ export default {
             currentSlideUrl: '',  // 当前显示的幻灯片URL
             currentPptPage: 1,  // 当前页码（从1开始）
             totalSlides: 10,  // 幻灯片总数
+            useRemotePptAssets: false,
+
+            lectureControlPage: "",
+            lecturePaused: false,
 
             showConfigUI: false,
             enableDictation: false,
@@ -159,6 +177,9 @@ export default {
         
         // 初始化PPT幻灯片图片序列
         async initPptSlides() {
+            if (this.useRemotePptAssets) {
+                return;
+            }
             this.totalSlides = 100; // 设置一个合理的最大值，避免重复检测
             this.pptSlides = [];
             this.isPreloading = true;
@@ -239,7 +260,13 @@ export default {
             }
             
             try {
-                const slideUrl = `${this.baseUrl}${pageNum}${this.imageExtension}`;
+                const slideUrl = this.useRemotePptAssets
+                    ? this.pptSlides[pageNum - 1]
+                    : `${this.baseUrl}${pageNum}${this.imageExtension}`;
+
+                if (!slideUrl) {
+                    return;
+                }
                 await this.loadImage(slideUrl);
                 
                 // 存储预加载的幻灯片URL
@@ -407,6 +434,47 @@ export default {
             }
         },
 
+        applyPptAssets(urls) {
+            if (!Array.isArray(urls) || urls.length === 0) {
+                return;
+            }
+            this.useRemotePptAssets = true;
+            this.pptSlides = urls;
+            this.totalSlides = urls.length;
+            this.currentPptPage = 1;
+            this.currentSlideUrl = urls[0] || '';
+            this.preloadedSlides = new Set();
+            this.preloadSlide(1);
+            this.preloadAroundCurrentPage();
+        },
+
+        sendLectureControl(action, payload = {}) {
+            if (!this.wsClient) {
+                return;
+            }
+            this.wsClient.sendData({
+                type: "event",
+                data: {
+                    type: "lecture_control",
+                    action,
+                    ...payload,
+                },
+            });
+        },
+
+        toggleLecturePause() {
+            const nextAction = this.lecturePaused ? "resume" : "pause";
+            this.sendLectureControl(nextAction);
+            this.lecturePaused = !this.lecturePaused;
+        },
+
+        gotoLecturePage() {
+            const pageNum = parseInt(this.lectureControlPage, 10);
+            if (!Number.isNaN(pageNum) && pageNum > 0) {
+                this.sendLectureControl("goto", { page_num: pageNum });
+            }
+        },
+
     },
 
     mounted() {
@@ -489,6 +557,8 @@ export default {
                         .then(id => {
                             data["media_id"] = id;
                         });
+                    } else if (type === "ppt_assets") {
+                        this.applyPptAssets(data.urls);
                     }
                 }
             }
@@ -505,7 +575,20 @@ export default {
             const mediaId = message["media_id"];
             if (mediaId) {
                 // 异步播放音频，不阻塞事件处理
-                streamAudioPlayer.waitUntilFinish(mediaId).catch(error => console.error("Error playing audio:", error));
+                streamAudioPlayer.waitUntilFinish(mediaId)
+                .then(() => {
+                    if (message.is_last && message.seq != null) {
+                        self.wsClient.sendData({
+                            type: "event",
+                            data: {
+                                type: "audio_playback_finished",
+                                seq: message.seq,
+                                media_id: mediaId,
+                            },
+                        });
+                    }
+                })
+                .catch(error => console.error("Error playing audio:", error));
             }
         }
 
@@ -589,6 +672,23 @@ export default {
                 }
                 this.recordChat(this.inputText);
                 this.inputText = "";
+            }
+        });
+
+        window.addEventListener("keydown", (e) => {
+            if (e.target && e.target.tagName === "INPUT") {
+                return;
+            }
+
+            if (e.code === "Space") {
+                e.preventDefault();
+                this.toggleLecturePause();
+            } else if (e.code === "ArrowRight") {
+                this.sendLectureControl("next");
+            } else if (e.code === "ArrowLeft") {
+                this.sendLectureControl("prev");
+            } else if (e.code === "KeyR") {
+                this.sendLectureControl("replay");
             }
         });
 
@@ -848,6 +948,20 @@ export default {
 .config-ui-hidden {
     opacity: 0;
     transform: translate(0, 1000px);
+}
+
+.lecture-controls {
+    margin-top: 20px;
+    text-align: left;
+}
+
+.lecture-buttons button,
+.lecture-goto button {
+    margin-right: 10px;
+}
+
+.lecture-goto {
+    margin-top: 10px;
 }
 
 .camera-container {

@@ -92,7 +92,7 @@ export default class FrontendAgent extends EventTarget {
      * 向后端发送数据
      * @param {Object} data - 要发送的数据对象
      * @param {string} data.type - 消息类型
-     * @param {*} data.payload - 消息内容
+    * @param {*} data.data - 消息内容
      */
     sendData(data) {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {

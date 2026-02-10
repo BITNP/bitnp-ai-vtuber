@@ -79,3 +79,16 @@ uv run run_server.py
 cd backend
 uv run run_agent.py
 ```
+
+#### 4.2.3 讲稿驱动（lecture_agent）
+1. 先生成讲稿与图片（见 `backend/ppt_script/README.md` 与 `backend/ppt_to_images.py`）
+2. 启动后端静态资源托管：
+``` shell
+cd backend
+uv run run_server.py --ppt-images-dir <图片目录> --ppt-mount-path /documents/slides
+```
+3. 启动讲稿播放 Agent：
+``` shell
+cd backend
+uv run run_agent.py --agent-type lecture_agent --lecture-script <*_scripts.txt 或 generated_scripts 目录> --ppt-images-dir <图片目录>
+```

@@ -16,13 +16,17 @@ from PIL import Image  #  pip install Pillow
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.llm_api.glm import GlmBot
-from backend.tokens import get_token
+try:
+    from backend.llm_api.glm import GlmBot  # type: ignore
+    from backend.tokens import get_token  # type: ignore
+except ImportError:
+    from llm_api.glm import GlmBot
+    from tokens import get_token
 
 #1.视觉识图
 class AbstractVisionModel(ABC):
     @abstractmethod
-    async def describe_image(self, base64_img:str) -> str:
+    async def describe_image(self, base64_img:str) -> str | None:
         pass
 
 class GlmVisionModel(AbstractVisionModel):
@@ -31,7 +35,7 @@ class GlmVisionModel(AbstractVisionModel):
         self.url = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
         self.model_name = "glm-4v-flash"
 
-    async def describe_image(self, base64_img:str) -> str:
+    async def describe_image(self, base64_img:str) -> str | None:
         headers = {
             'Content-Type':'application/json',
             'Authorization': f'Bearer {self.api_key}'
@@ -87,7 +91,7 @@ class PPTparser:
         try:
             img = Image.open(io.BytesIO(image_blob))
             if img.mode != 'RGB': img = img.convert('RGB')
-            img.thumbnail(1024,1024)
+            img.thumbnail((1024,1024))
 
             buf = io.BytesIO()
             img.save(buf, format='JPEG', quality=85)
@@ -194,7 +198,7 @@ async  def generate_ppt_scripts(ppt_path:str, vision_config:Dict, text_gen_api_k
 
         *** 核心风格 ***：
         1. 不要机械地朗读PPT上的文字！要结合【视觉描述】和【文字内容】。   
-        2. 尽量用口语化的表达，不要读得太书面化。
+        2. 用口语化的表达，不要读得太书面化。
         3. 表情动作：说话时必须自然地穿插表情指令，仅限使用：[点头] [摇头] [wink]。平均每段话使用1~2个。
 
         *** 强制格式规范（必须严格遵守） ***：
@@ -203,6 +207,7 @@ async  def generate_ppt_scripts(ppt_path:str, vision_config:Dict, text_gen_api_k
            - 错误示例：`好的，第1页：大家好...`
         2. 严禁 Markdown：绝对不要使用 `**加粗**`、`# 标题`、`- 列表` 等符号，直接用自然语言表达。
         3. 逻辑衔接：严禁使用“下一页是”、“接下来看下一页”、“好的”、"好呀"这种报幕词。要用内容逻辑自然过渡。
+           - 避免在开头说当前页码。
 
         *** 视觉讲解逻辑 ***：
         - 如果视觉描述显示是“图表/代码/截图”，请具体描述图里的细节（例如“大家看这行代码...”）。
@@ -245,7 +250,10 @@ async  def generate_ppt_scripts(ppt_path:str, vision_config:Dict, text_gen_api_k
 
             【生成要求】
             - 必须以 `[PPT_{page}]` 开头。
-            - 语气活泼，禁止 Markdown 符号。
+            - 语气活泼，禁止 Markdown 符号 和 emoji 符号。
+            - 避免使用“下一页”、“接下来”等报幕词，避免在开头说当前页码。
+            - 不要说“好呀”、“好的”等口头禅。
+            - 避免在开头回顾上一页内容，要直接切入主题；上一页讲稿仅作为Callback参考。
             - 拒绝平铺直叙：不要把PPT上的字都念一遍！挑一个重点深入讲。
             - 包含 1-2 个表情（[点头]/[摇头]/[wink]）。
             - 如果当前页文字极少（如仅有标题），请结合视觉描述或主题进行发挥，不要只说一句话。
@@ -288,9 +296,9 @@ def save_files(ppt_path, results):
     script_txt_path = os.path.join(out_dir, f"{base}_scripts.txt")
     with open(script_txt_path, 'w', encoding='utf-8') as f:
         for item in results:
-            f.write(f"第{item['page']}页\n")
+            # f.write(f"第{item['page']}页\n")
             f.write(f"{item['script']}\n\n")
-            f.write("\n\n")
+            # f.write("\n\n")
 
     vision_txt_path = os.path.join(out_dir, f"{base}_vision.txt")
     with open(vision_txt_path, 'w', encoding='utf-8') as f:
@@ -306,15 +314,23 @@ def save_files(ppt_path, results):
             f.write(f"{item['text']}\n")
             f.write("\n")
 
+from argparse import ArgumentParser
+
+def args_parse():
+    parser = ArgumentParser(description="PPT讲稿生成器")
+    parser.add_argument("ppt_path", type=str, help="PPT文件路径")
+    return parser.parse_args()
 
 if __name__ == "__main__":
-    from backend.tokens import get_token
+    from tokens import get_token
+    
     VISION_CFG = {
         "provider": "glm",
         "api_key": get_token('glm')
     }
     TEXT_KEY = get_token('glm')
-    PPT_FILE = "C:/Users/31047/Desktop/ch8I.pptx"
+    args = args_parse()
+    PPT_FILE = args.ppt_path
     if os.path.exists(PPT_FILE):
         asyncio.run(generate_ppt_scripts(PPT_FILE, VISION_CFG, TEXT_KEY))
     else:
