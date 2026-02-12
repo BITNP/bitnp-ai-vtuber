@@ -27,3 +27,12 @@ class SentenceSepNode(StreamNode):
 
         self.buffer = split[-1]
         return sentences
+
+    async def flush(self):
+        if not self.buffer:
+            return
+        remaining = self.buffer
+        self.buffer = ""
+        if self.next_nodes:
+            for next_node in self.next_nodes:
+                await next_node.handle(remaining)

@@ -2,22 +2,26 @@ export default class StreamAudioPlayer {
   constructor() {
     this.audioContext = null;
     this.sourceNode = null;
-    this.scriptProcessor = null;
+    this.workletNode = null;
     this.isPlaying = false;
-    this.audioBuffer = null;
-    this.bufferPosition = 0;
     this.expectedSampleRate = 24000; // 常见TTS采样率
     this.numChannels = 1; // 默认单声道
     this.isStreaming = false;
     this.mediaIdCounter = 0;
     this.mediaMap = new Map();
     this.isContextSuspended = false;
+    this.totalSamplesScheduled = 0;
+    this.playedSamples = 0;
+    this.queueSamples = 0;
+    this.pendingChunks = [];
+    this.maxQueueSeconds = 120;
+    this.underrunCount = 0;
+    this.outputSampleRate = 0;
 
     // 音量计算相关属性
     this.volume = 0; // 当前音量 (0-1)
     // this.volumeUpdateInterval = 30; // 音量更新间隔(ms)
     this.lastVolumeUpdateTime = 0;
-    
   }
 
   /**
@@ -26,12 +30,7 @@ export default class StreamAudioPlayer {
   async init() {
     try {
       this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      
-      // 创建分析器节点
-      this.analyserNode = this.audioContext.createAnalyser();
-      this.analyserNode.fftSize = 256; // 小一点的fftSize提高性能
-      this.analyserNode.smoothingTimeConstant = 0.5; // 平滑处理
-      this.analyserDataArray = new Float32Array(this.analyserNode.fftSize);
+      this.outputSampleRate = this.audioContext.sampleRate;
       
       if (this.audioContext.state === 'suspended') {
         console.log('Audio context is suspended, user interaction required to resume');
@@ -62,109 +61,83 @@ export default class StreamAudioPlayer {
 
     this.isStreaming = true;
     this.isPlaying = true;
+    const setup = () => {
+      this.setupAudioProcessing().catch((error) => {
+        console.error('Failed to setup audio processing:', error);
+      });
+    };
     
     // 如果音频上下文被挂起，尝试恢复
     if (this.audioContext.state === 'suspended') {
       this.audioContext.resume().then(() => {
         console.log('Audio context resumed');
         this.isContextSuspended = false;
-        this.setupAudioProcessing();
+        setup();
       });
     } else {
-      this.setupAudioProcessing();
+      setup();
     }
   }
 
   /**
    * 设置音频处理
    */
-  setupAudioProcessing() {
-    // 创建 ScriptProcessorNode
-    this.scriptProcessor = this.audioContext.createScriptProcessor(4096, 0, 1);
-    
-    // 连接节点: scriptProcessor -> analyser -> destination
-    this.scriptProcessor.connect(this.analyserNode);
-    this.analyserNode.connect(this.audioContext.destination);
-    
-    this.scriptProcessor.onaudioprocess = (audioProcessingEvent) => {
-      if (!this.isPlaying) return;
-      
-      const outputBuffer = audioProcessingEvent.outputBuffer;
-      const outputData = outputBuffer.getChannelData(0);
-      const samplesNeeded = outputBuffer.length;
-      
-      // 输出数据处理
-      if (!this.audioBuffer) {
-        outputData.fill(0);
-        // this.updateVolume(0, Date.now());
-        return;
+  async setupAudioProcessing() {
+    if (this.workletNode) {
+      return;
+    }
+
+    if (!this.audioContext.audioWorklet) {
+      throw new Error('AudioWorklet is not supported in this environment.');
+    }
+
+    await this.audioContext.audioWorklet.addModule(
+      new URL('./StreamAudioProcessor.js', import.meta.url),
+    );
+
+    this.workletNode = new AudioWorkletNode(
+      this.audioContext,
+      'stream-audio-processor',
+      {
+        numberOfInputs: 0,
+        numberOfOutputs: 1,
+        outputChannelCount: [1],
+      },
+    );
+
+    this.workletNode.connect(this.audioContext.destination);
+
+    this.workletNode.port.onmessage = (event) => {
+      const data = event.data || {};
+      if (data.type === 'stats') {
+        this.updateVolumeFromValue(data.volume || 0, Date.now());
+        if (typeof data.playedSamples === 'number') {
+          this.playedSamples = data.playedSamples;
+        }
+        if (typeof data.queueSamples === 'number') {
+          this.queueSamples = data.queueSamples;
+        }
+        if (typeof data.underrunCount === 'number') {
+          this.underrunCount = data.underrunCount;
+        }
       }
-      
-      if (this.bufferPosition >= this.audioBuffer.length) {
-        outputData.fill(0);
-        // this.updateVolume(0, Date.now());
-        return;
-      }
-      
-      const samplesAvailable = this.audioBuffer.length - this.bufferPosition;
-      const samplesToCopy = Math.min(samplesNeeded, samplesAvailable);
-      
-      // 复制数据
-      for (let i = 0; i < samplesToCopy; i++) {
-        outputData[i] = this.audioBuffer[this.bufferPosition + i];
-      }
-      
-      // 剩余部分填0
-      for (let i = samplesToCopy; i < samplesNeeded; i++) {
-        outputData[i] = 0;
-      }
-      
-      this.bufferPosition += samplesToCopy;
-      
-      // 更新音量
-      const self = this;
-      const volumeLoop = () => {
-        self.updateVolumeFromData(outputData, Date.now());
-        requestAnimationFrame(volumeLoop);
-      }
-      volumeLoop();
     };
+
+    if (this.pendingChunks.length > 0) {
+      const pending = this.pendingChunks.slice();
+      this.pendingChunks = [];
+      pending.forEach((chunk) => {
+        this.enqueueChunk(chunk);
+      });
+    }
   }
 
   /**
    * 从音频数据计算音量
    */
-  updateVolumeFromData(audioData, currentTime) {
-    // // 按间隔更新音量
-    // if (currentTime - this.lastVolumeUpdateTime < this.volumeUpdateInterval) {
-    //   return;
-    // }
-    
+  updateVolumeFromValue(rawVolume, currentTime) {
     this.lastVolumeUpdateTime = currentTime;
-    
-    // 计算RMS音量
-    let sum = 0;
-    for (let i = 0; i < audioData.length; i++) {
-      sum += audioData[i] * audioData[i];
-    }
-    
-    const rms = Math.sqrt(sum / audioData.length);
-    
-    // 计算峰值
-    let peak = 0;
-    for (let i = 0; i < audioData.length; i++) {
-      const absValue = Math.abs(audioData[i]);
-      if (absValue > peak) {
-        peak = absValue;
-      }
-    }
-    
-    // 使用RMS和峰值的综合值
-    const rawVolume = Math.max(rms, peak * 0.7) * 10;
-
-    // 平滑处理
-    const smoothingFactor = 0.5;
-    this.volume = smoothingFactor * rawVolume + (1 - smoothingFactor) * this.volume;
+    this.volume = rawVolume;
   }
 
   /**
@@ -197,12 +170,28 @@ export default class StreamAudioPlayer {
       // 解析WAV并获取音频数据
       const audioData = await this.decodeWavData(bytes.buffer);
       
-      // 添加到缓冲区
-      this.appendAudioData(audioData);
+      const chunkSamples = audioData.length;
+      const queuedSeconds = this.getRemainingDuration();
+
+      if (queuedSeconds > this.maxQueueSeconds) {
+        console.warn(
+          `Audio queue is too large (${queuedSeconds.toFixed(2)}s). Dropping chunk.`,
+        );
+        return -1;
+      }
+
+      this.totalSamplesScheduled += chunkSamples;
+      const endSample = this.totalSamplesScheduled;
+
+      if (this.workletNode) {
+        this.enqueueChunk(audioData);
+      } else {
+        this.pendingChunks.push(audioData);
+      }
+
       this.mediaMap.set(mediaId, {
-        data: audioData,
         timestamp: Date.now(),
-        endTime: this.getTotalDuration()
+        endSample,
       });
       
       return mediaId;
@@ -218,12 +207,19 @@ export default class StreamAudioPlayer {
       throw new Error('Media ID not found');
     }
 
-    const endTime = mediaInfo.endTime;
+    const endSample = mediaInfo.endSample;
 
-    console.log("[DEBUG] waiting media until finish:", mediaId, "curr_time", this.getCurrentTime(), "end_time", endTime);
+    console.log("[DEBUG] waiting media until finish:", mediaId, "played_samples", this.playedSamples, "end_sample", endSample);
 
-    while (this.getCurrentTime() < endTime) {
-      await new Promise(resolve => setTimeout(resolve, 100));
+    try {
+      while (this.playedSamples < endSample) {
+        if (!this.isStreaming || !this.audioContext || this.audioContext.state === 'closed') {
+          throw new Error('Stream stopped before media finished');
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    } finally {
+      this.mediaMap.delete(mediaId);
     }
   }
 
@@ -387,33 +383,39 @@ export default class StreamAudioPlayer {
   /**
    * 追加音频数据到缓冲区
    */
-  appendAudioData(float32Array) {
-    if (!this.audioBuffer) {
-      this.audioBuffer = new Float32Array(float32Array);
-    } else {
-      const newBuffer = new Float32Array(this.audioBuffer.length + float32Array.length);
-      newBuffer.set(this.audioBuffer);
-      newBuffer.set(float32Array, this.audioBuffer.length);
-      this.audioBuffer = newBuffer;
+  enqueueChunk(float32Array) {
+    if (!this.workletNode) {
+      return;
     }
-    
-    console.log(`Audio buffer size: ${this.audioBuffer.length} samples, duration: ${this.getTotalDuration().toFixed(2)}s`);
+    if (!(float32Array instanceof Float32Array)) {
+      return;
+    }
+    this.workletNode.port.postMessage(
+      {
+        type: 'enqueue',
+        audioBuffer: float32Array.buffer,
+      },
+      [float32Array.buffer],
+    );
   }
 
   /**
    * 获取总音频时长
    */
   getTotalDuration() {
-    if (!this.audioBuffer) return 0;
-    return this.audioBuffer.length / this.audioContext.sampleRate;
+    if (!this.audioContext) return 0;
+    return this.totalSamplesScheduled / this.audioContext.sampleRate;
   }
 
   /**
    * 获取剩余音频时长
    */
   getRemainingDuration() {
-    if (!this.audioBuffer) return 0;
-    const remainingSamples = this.audioBuffer.length - this.bufferPosition;
+    if (!this.audioContext) return 0;
+    const remainingSamples = Math.max(
+      0,
+      this.totalSamplesScheduled - this.playedSamples,
+    );
     return remainingSamples / this.audioContext.sampleRate;
   }
 
@@ -421,8 +423,8 @@ export default class StreamAudioPlayer {
    * 获取当前播放位置
    */
   getCurrentTime() {
-    if (!this.audioBuffer || this.bufferPosition === 0) return 0;
-    return this.bufferPosition / this.audioContext.sampleRate;
+    if (!this.audioContext || this.playedSamples === 0) return 0;
+    return this.playedSamples / this.audioContext.sampleRate;
   }
 
   // 其他方法保持不变...
@@ -443,14 +445,21 @@ export default class StreamAudioPlayer {
   stop() {
     this.isPlaying = false;
     this.isStreaming = false;
-    this.bufferPosition = 0;
-    
-    if (this.scriptProcessor) {
-      this.scriptProcessor.disconnect();
-      this.scriptProcessor = null;
+    this.playedSamples = 0;
+    this.totalSamplesScheduled = 0;
+    this.queueSamples = 0;
+    this.pendingChunks = [];
+
+    if (this.workletNode) {
+      try {
+        this.workletNode.port.postMessage({ type: 'clear' });
+      } catch (error) {
+        console.warn('Failed to clear worklet queue:', error);
+      }
+      this.workletNode.disconnect();
+      this.workletNode = null;
     }
-    
-    this.audioBuffer = null;
+
     this.mediaMap.clear();
   }
 

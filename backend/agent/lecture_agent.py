@@ -72,7 +72,7 @@ class LectureAgent(Agent):
         self._audio_wait_timeout = 300
 
         # streaming workflow: sentence_sep -> brackets_parsor -> event_emitter
-        self.sentence_sep_node = SentenceSepNode(seps="'.:;?!。：；？！\n")
+        self.sentence_sep_node = SentenceSepNode(seps="\n")
         self.brackets_parsor_node = BracketsParsorNode()
 
         async def event_emitter_lambda(_, data):
@@ -250,7 +250,7 @@ class LectureAgent(Agent):
                 await self.emit({"type": "start_of_response"})
 
                 await self.sentence_sep_node.handle(content)
-                await self.sentence_sep_node.handle(" ")
+                await self.sentence_sep_node.flush()
 
                 await self.emit({"type": "end_of_response", "response": content})
         except asyncio.CancelledError:
