@@ -270,28 +270,22 @@ class LectureAgent(Agent):
                 self._audio_waiters[seq] = loop.create_future()
 
                 if self.tts_stream:
-                    chunks: List[bytes] = []
-                    async for media_data in self.tts.synthesize_stream(content):  # type: ignore[misc]
-                        chunks.append(media_data)
-
-                    if not chunks:
-                        waiter = self._audio_waiters.pop(seq, None)
-                        if waiter and not waiter.done():
-                            waiter.set_result(True)
-                        return
-
                     first_pack = True
-                    for idx, media_data in enumerate(chunks):
+                    buffered_chunk: bytes | None = None
+
+                    async for media_data in self.tts.synthesize_stream(content):  # type: ignore[misc]
+                        if buffered_chunk is None:
+                            buffered_chunk = media_data
+                            continue
+
                         if self.tts.format == "pcm":
-                            media_data = pcm2wav(
-                                media_data,
+                            buffered_chunk = pcm2wav(
+                                buffered_chunk,
                                 sample_rate=self.tts.sample_rate,
                                 channels=self.tts.channels,
                                 bits_per_sample=self.tts.bits_per_sample,
                             )
-                        base64_data = base64.b64encode(media_data).decode("utf-8")
-
-                        is_last = idx == len(chunks) - 1
+                        base64_data = base64.b64encode(buffered_chunk).decode("utf-8")
 
                         display_text = content if first_pack else ""
                         first_pack = False
@@ -302,8 +296,36 @@ class LectureAgent(Agent):
                             "media_data": base64_data,
                             "format": "wav",
                             "seq": seq,
-                            "is_last": is_last,
+                            "is_last": False,
                         })
+
+                        buffered_chunk = media_data
+
+                    if buffered_chunk is None:
+                        waiter = self._audio_waiters.pop(seq, None)
+                        if waiter and not waiter.done():
+                            waiter.set_result(True)
+                        return
+
+                    if self.tts.format == "pcm":
+                        buffered_chunk = pcm2wav(
+                            buffered_chunk,
+                            sample_rate=self.tts.sample_rate,
+                            channels=self.tts.channels,
+                            bits_per_sample=self.tts.bits_per_sample,
+                        )
+                    base64_data = base64.b64encode(buffered_chunk).decode("utf-8")
+
+                    display_text = content if first_pack else ""
+
+                    await self.emit({
+                        "type": "say_aloud",
+                        "content": display_text,
+                        "media_data": base64_data,
+                        "format": "wav",
+                        "seq": seq,
+                        "is_last": True,
+                    })
                 else:
                     media_data = await self.tts.synthesize(content)
                     if self.tts.format == "pcm":
