@@ -93,8 +93,7 @@ uv run run_agent.py
 #### 4.2.3 讲稿驱动（lecture_agent）
 
 1. 先生成讲稿与图片（见 `backend/ppt_script/README.md` 与 `backend/ppt_to_images.py`）
-    **讲稿必须包含阿拉伯数字格式的页码**，如 `myslide_01.jpg` （通过正则表达式匹配数字）。应避免文档名其余部分出现阿拉伯数字，
-    如 `2025-test_01.jpg` ，这样可能引发ppt页码错误。
+    **图片文件名末尾必须包含阿拉伯数字格式的页码**，如 `myslide_01.jpg` （通过正则表达式匹配数字）。
 
 2. 启动后端静态资源托管：
 

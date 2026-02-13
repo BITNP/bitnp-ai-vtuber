@@ -22,7 +22,7 @@ from tts.pcm2wav import pcm2wav
 from config_types import TTS_Config
 
 PPT_TAG_PATTERN = re.compile(r"\[(?:PPT_([0-9]+)|翻页:?\s*([0-9]+))\]")
-
+PPT_PAGE_NAME_PATTERN = re.compile(r"^.*?(\d+)\.[^.]+$")
 
 def _is_empty(content: str) -> bool:
     return not content.strip()
@@ -168,7 +168,7 @@ class LectureAgent(Agent):
         ]
 
         def sort_key(name: str):
-            match = re.search(r"(\d+)", name)
+            match = PPT_PAGE_NAME_PATTERN.match(name)
             if match:
                 return (0, int(match.group(1)))
             return (1, name)
