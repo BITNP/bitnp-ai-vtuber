@@ -2,17 +2,18 @@
 基于分层总结策略的课件讲稿生成器
 输入：文本文档（纯文本或者Markdown）
 输出：Markdown文档
-使用兼容OpenAI API的大语言模型，通过分层处理解决上下文长度限制
+通过分层处理解决上下文长度限制
 """
 
 import os
 import re
 import json
 import logging
+import asyncio
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, asdict
-from openai import OpenAI
 from pathlib import Path
+from backend.llm_api import create_bot
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ class HierarchicalScriptGenerator:
         api_key: str,
         base_url: str = "https://api.openai.com/v1",
         model: str = "gpt-3.5-turbo",
+        api_name: str = "openai"
     ):
         """
         初始化生成器
@@ -51,12 +53,17 @@ class HierarchicalScriptGenerator:
             api_key: API密钥
             base_url: API基础URL（兼容OpenAI格式）
             model: 模型名称
+            api_name: API名称（openai或glm）
         """
-        self.client = OpenAI(
-            api_key=api_key,
+        # 使用llm_api创建bot实例
+        self.bot = create_bot(
+            api_name=api_name,
+            token=api_key,
+            model_name=model,
             base_url=base_url
         )
         self.model = model
+        self.api_name = api_name
         
         # 缓存存储中间结果
         self.document_summary = None
@@ -300,7 +307,7 @@ class HierarchicalScriptGenerator:
         
         return paragraphs
 
-    def call_llm(self, prompt: str, system_prompt: str = None) -> str:
+    async def call_llm(self, prompt: str, system_prompt: str = None) -> str:
         """
         调用LLM API
         
@@ -313,19 +320,25 @@ class HierarchicalScriptGenerator:
         """
         logger.debug('LLM调用：%s' % prompt[:20])
         try:
-            response = self.client.responses.create(
-                model=self.model,
-                instructions=system_prompt,
-                input=prompt
-                # max_tokens=max_tokens
-                # temperature=0.3  # 较低的温度以获得更确定性的输出
-            )
-            return response.output_text
+            # 清空之前的上下文
+            self.bot.messages = []
+            
+            # 设置系统提示
+            if system_prompt:
+                self.bot.append_context(system_prompt, role='system')
+            
+            # 添加用户提示
+            self.bot.append_context(prompt, role='user')
+            
+            # 调用LLM API
+            response = await self.bot.respond_to_context()
+            
+            return response
         except Exception as e:
             print(f"API调用错误: {e}")
             return ""
     
-    def generate_segment_summary(self, segment: DocumentSegment) -> str:
+    async def generate_segment_summary(self, segment: DocumentSegment) -> str:
         """
         生成段落总结
         
@@ -338,7 +351,7 @@ class HierarchicalScriptGenerator:
         prompt = f"""请概括以下段落的主要内容，保持简洁明了，直接输出结果：
 {segment.content}"""
         
-        summary = self.call_llm(
+        summary = await self.call_llm(
             prompt=prompt,
             system_prompt="你是一个理想坚定、循循善诱、学识渊博、温柔美丽的青年女教师。",
             #max_tokens=200
@@ -367,7 +380,7 @@ class HierarchicalScriptGenerator:
         
         return "\n".join(segments_summaries)
     
-    def generate_chapter_summary(self, chapter: Chapter) -> str:
+    async def generate_chapter_summary(self, chapter: Chapter) -> str:
         """
         基于合并的段落总结生成章节总结
         
@@ -384,7 +397,7 @@ class HierarchicalScriptGenerator:
 
 {chapter.segments_summary}"""
         
-        summary = self.call_llm(
+        summary = await self.call_llm(
             prompt=prompt,
             system_prompt="你是一个理想坚定、循循善诱、学识渊博、温柔美丽的青年女教师。",
             #max_tokens=250
@@ -392,7 +405,7 @@ class HierarchicalScriptGenerator:
         logger.debug('章节总结：%s...' % summary[:20])
         return summary
     
-    def generate_document_summary(self, chapters_dict: Dict[str, Chapter]) -> str:
+    async def generate_document_summary(self, chapters_dict: Dict[str, Chapter]) -> str:
         """
         生成整个文档的总结
         
@@ -417,7 +430,7 @@ class HierarchicalScriptGenerator:
 
 {combined_chapter_summaries}"""
         
-        summary = self.call_llm(
+        summary = await self.call_llm(
             prompt=prompt,
             system_prompt="你是一个理想坚定、循循善诱、学识渊博、温柔美丽的青年女教师。",
             #max_tokens=400
@@ -425,7 +438,7 @@ class HierarchicalScriptGenerator:
         
         return summary
     
-    def generate_segment_script(
+    async def generate_segment_script(
         self, 
         segment: DocumentSegment, 
         chapter_summary: str, 
@@ -459,7 +472,7 @@ class HierarchicalScriptGenerator:
 1. 语言生动、易于理解
 2. 你可以使用以下表情：[点头]、[摇头]、[wink]，除此之外不应输出其他提示性内容"""
         
-        script = self.call_llm(
+        script = await self.call_llm(
             prompt=prompt,
             system_prompt="你是一个理想坚定、循循善诱、学识渊博、温柔美丽的青年女教师。",
             #max_tokens=800
@@ -467,7 +480,7 @@ class HierarchicalScriptGenerator:
         
         return script
     
-    def process_document(self, document_path: str, output_dir: str = "output") -> Dict[str, Any]:
+    async def process_document(self, document_path: str, output_dir: str = "output") -> Dict[str, Any]:
         """
         处理整个文档生成讲稿
         
@@ -492,7 +505,7 @@ class HierarchicalScriptGenerator:
             print(f"  处理章节: {chapter.title}")
             for segment in chapter.segments:
                 print(f"    处理段落: {segment.segment_id}")
-                segment.summary = self.generate_segment_summary(segment)
+                segment.summary = await self.generate_segment_summary(segment)
         
         # 第二层：生成章节段落合并总结
         print("步骤3: 生成章节段落合并总结...")
@@ -502,11 +515,11 @@ class HierarchicalScriptGenerator:
         # 第三层：生成章节总结
         print("步骤4: 生成章节总结...")
         for chapter_id, chapter in self.chapters.items():
-            chapter.chapter_summary = self.generate_chapter_summary(chapter)
+            chapter.chapter_summary = await self.generate_chapter_summary(chapter)
         
         # 第四层：生成文档总结
         print("步骤5: 生成文档整体总结...")
-        self.document_summary = self.generate_document_summary(self.chapters)
+        self.document_summary = await self.generate_document_summary(self.chapters)
         
         # 第五层：生成每个段落的讲稿
         print("步骤6: 生成段落讲稿...")
@@ -515,7 +528,7 @@ class HierarchicalScriptGenerator:
         for chapter_id, chapter in self.chapters.items():
             print(f"  为章节生成讲稿: {chapter.title}")
             for segment in chapter.segments:
-                script = self.generate_segment_script(
+                script = await self.generate_segment_script(
                     segment, 
                     chapter.chapter_summary, 
                     self.document_summary
@@ -588,17 +601,19 @@ class HierarchicalScriptGenerator:
         
         print(f"结果已保存到 {output_dir}/ 目录")
 
-def main():
+async def main():
     """主函数"""
     import argparse
     
     parser = argparse.ArgumentParser(description="分层讲稿生成器")
     parser.add_argument("--document", type=str, required=True, help="文本文档路径")
     parser.add_argument("--api-key", type=str, default=os.getenv("OPENAI_API_KEY"), help="API密钥")
-    parser.add_argument("--base-url", type=str, default="https://api.openai.com", 
+    parser.add_argument("--base-url", type=str, default="https://api.openai.com/v1", 
                        help="API基础URL（默认为OpenAI官方API）")
     parser.add_argument("--model", type=str, default="gpt-3.5-turbo", 
                        help="模型名称")
+    parser.add_argument("--api-name", type=str, default="openai", 
+                       help="API名称（openai或glm）")
     parser.add_argument("--output_dir", type=str, default="output", 
                        help="输出目录")
     
@@ -608,11 +623,12 @@ def main():
     generator = HierarchicalScriptGenerator(
         api_key=args.api_key,
         base_url=args.base_url,
-        model=args.model
+        model=args.model,
+        api_name=args.api_name
     )
     
     # 处理文档
-    results = generator.process_document(
+    results = await generator.process_document(
         document_path=args.document,
         output_dir=args.output_dir
     )
@@ -629,4 +645,4 @@ def main():
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
-    main()
+    asyncio.run(main())

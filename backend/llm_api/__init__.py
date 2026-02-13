@@ -1,8 +1,10 @@
 from .abstract_bot import AbstractBot
 from .glm import GlmBot
+from .openai import OpenAIBot
 
 REGISTRY = {
     "glm": GlmBot,
+    "openai": OpenAIBot,
 }
 
 def create_bot(api_name: str, **kwargs) -> AbstractBot:
