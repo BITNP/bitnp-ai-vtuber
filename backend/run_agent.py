@@ -45,8 +45,8 @@ llm_api_config = LLM_Config(
 
 tts_config = Dashscope_TTS_Config(
     api_key = get_token('dashscope'),
-    voice = "qwen-tts-vc-shumeiniang-voice-20260128223100508-07b4",
-    model = "qwen3-tts-vc-realtime-2025-11-27"
+    voice = "qwen-tts-vc-shumeiniang-voice-20260213105602228-e984",
+    model = "qwen3-tts-vc-realtime-2026-01-15"
 )
 tts_stream = True
 if args.no_tts_stream:

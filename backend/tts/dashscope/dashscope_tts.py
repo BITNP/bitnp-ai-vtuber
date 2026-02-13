@@ -12,7 +12,7 @@ from typing import Literal, AsyncGenerator, List
 PCM_Format = Literal['pcm']
 
 URL = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
-DEFAULT_TARGET_MODEL = "qwen3-tts-vc-realtime-2025-11-27"
+DEFAULT_TARGET_MODEL = "qwen3-tts-vc-realtime-2026-01-15"
 
 def is_nonsense(text: str):
     """

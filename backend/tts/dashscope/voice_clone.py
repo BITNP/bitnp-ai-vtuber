@@ -4,7 +4,7 @@ import pathlib
 import dashscope  # DashScope Python SDK 版本需要不低于1.23.9
 
 # ======= 常量配置 =======
-DEFAULT_TARGET_MODEL = "qwen3-tts-vc-realtime-2025-11-27"  # 声音复刻、语音合成要使用相同的模型
+DEFAULT_TARGET_MODEL = "qwen3-tts-vc-realtime-2026-01-15"  # 声音复刻、语音合成要使用相同的模型
 DEFAULT_AUDIO_MIME_TYPE = "audio/mpeg"
 
 def query_voice_list(api_key: str, page_size: int = 10, page_index: int = 0):
