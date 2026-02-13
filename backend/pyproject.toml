@@ -59,9 +59,7 @@ dependencies = [
     "x-transformers>=2.11.23",
     "python-pptx>=0.6.21",
     "pillow>=10.0.0",
-]
-
-[tool.uv.workspace]
-members = [
-    "transcription",
+    "openai>=2.20.0",
+    "dataclasses>=0.8",
+    "pathlib>=1.0.1",
 ]
