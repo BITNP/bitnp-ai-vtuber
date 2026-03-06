@@ -43,3 +43,5 @@ __screenshots__/
 
 # ccls
 .ccls-cache/
+
+.ruff_cache/
