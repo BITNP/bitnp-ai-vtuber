@@ -5,13 +5,12 @@ import base64
 import json
 import requests
 from abc import ABC, abstractmethod
-from typing import List, Dict
+from typing import List, Dict, Any
 import functools
+import glob
+import re
+#import logging
 
-from fontTools.ttx import process
-from pptx import Presentation #  pip install python-pptx
-from pptx.enum.shapes import MSO_SHAPE_TYPE
-import io
 from PIL import Image  #  pip install Pillow
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -23,315 +22,257 @@ except ImportError:
     from llm_api.glm import GlmBot
     from tokens import get_token
 
-#1.视觉识图
-class AbstractVisionModel(ABC):
-    @abstractmethod
-    async def describe_image(self, base64_img:str) -> str | None:
-        pass
+# 1.视觉识图 - using vlm_api abstraction
+try:
+    from vlm_api import create_vlm
+except ImportError:
+    # Fallback for development
+    import sys
 
-class GlmVisionModel(AbstractVisionModel):
-    def __init__(self, api_key: str,):
-        self.api_key = api_key
-        self.url = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
-        self.model_name = "glm-4v-flash"
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from vlm_api import create_vlm
 
-    async def describe_image(self, base64_img:str) -> str | None:
-        headers = {
-            'Content-Type':'application/json',
-            'Authorization': f'Bearer {self.api_key}'
-        }
 
-        prompt_text = """
-                请分析这张 PPT 图片。
-                1. 如果它是**有意义的内容**（如图表、数据截图、产品照片、核心文字），请详细描述其关键信息。
-                2. 如果它是**无关装饰**（如简单的 LOGO、页码、纯背景纹理、无意义的线条或图标），请直接回复 "IGNORE_IMAGE"。
-                3. **描述风格**：请用客观、详细的语言描述，不要加“这张图展示了”这种废话，直接说内容。
-                """
-
-        data = {
-            "model": self.model_name,
-            "messages": [{ "role": "user","content": [
-                        {"type":"image_url","image_url":{"url": base64_img}},
-                        {"type":"text","text": prompt_text}
-            ]}],
-            "stream": False,
-            "temperature": 0.1
-        }
-
-        loop = asyncio.get_event_loop()
+# 2.直接从预转换图片目录加载图片
+def load_preconverted_images(image_dir: str) -> List[Dict]:
+    """
+    从预转换的图片目录中加载图片
+    图片目录默认为 ../frontend/public/documents/slides
+    """
+    # 查找匹配的图片文件 (幻灯片XXX.PNG 或 slide_XXX.png)
+    png_pattern = os.path.join(image_dir, "幻灯片*.PNG")
+    png_files = glob.glob(png_pattern)
+    
+    if not png_files:
+        png_pattern = os.path.join(image_dir, "slide_*.png")
+        png_files = glob.glob(png_pattern)
+    
+    # 排序图片文件以确保正确的页面顺序
+    png_files.sort(key=lambda x: int(re.search(r'(\d+)', os.path.basename(x)).group(1)) if re.search(r'(\d+)', os.path.basename(x)) else 0)
+    
+    slides_data = []
+    for i, image_path in enumerate(png_files):
         try:
-            func = functools.partial(requests.post, self.url, headers=headers, json=data)
-            resp = await loop.run_in_executor(None, func)
-
-            if resp.status_code != 200:
-                return f"报错{resp.status_code}"
-            content = resp.json()['choices'][0]['message']['content']
-
-            if "IGNORE_IMAGE" in content:
-                return None
-            return content
-
+            # 为图片创建基本文本描述（因为没有PDF，所以暂时使用占位符）
+            slides_data.append(
+                {
+                    "page": i + 1,
+                    "text": f"第{i+1}页内容",  # 占位文本，实际应用中可能需要OCR或其他方式获取文本
+                    "image_path": image_path  # 添加图片路径用于后续处理，但不包含二进制数据
+                }
+            )
         except Exception as e:
-            return f"报错{e}"
-
-#2.ppt解析
-class PPTparser:
-    def __init__(self, ppt_path:str):
-        self.ppt_path = ppt_path
-
-    def get_iter_shapes(self,shapes):
-         for shape in shapes:
-             if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
-                 yield from self.get_iter_shapes(shape.shapes)
-             else:
-                 yield shape
-
-    def process_image(self, image_blob):
-        """转JPG+压缩+添加Header"""
-        try:
-            img = Image.open(io.BytesIO(image_blob))
-            if img.mode != 'RGB': img = img.convert('RGB')
-            img.thumbnail((1024,1024))
-
-            buf = io.BytesIO()
-            img.save(buf, format='JPEG', quality=85)
-            b64 = base64.b64encode(buf.getvalue()).decode('utf-8')
-            return f"data:image/jpeg;base64,{b64}"
-        except:
-            return None
-
-    def extract_content(self) -> List[Dict]:
-#        if not os.path.exists(self.ppt_path):
-#            raise FileNotFoundError(f"PPT不存在")
-        prs = Presentation(self.ppt_path)
-        slides_data = []
-
-        for i,slide in enumerate(prs.slides):
-            text_runs = []
-            images_bs64 = []
-
-            for shape in self.get_iter_shapes(slide.shapes):
-                if shape.has_text_frame and shape.text.strip():
-                    text_runs.append(shape.text.strip())
-
-                if hasattr(shape, "image"):
-                    if len(shape.image.blob) > 3*1024:
-                        processed = self.process_image(shape.image.blob)
-                        if processed:
-                            images_bs64.append(processed)
-
-            page_text = "\n".join(text_runs).strip()
-            if not page_text:
-                page_text = "本页无文字，根据图片内容"
-
-            slides_data.append({
-                "page": i+1,
-                "text": page_text,
-                "images": images_bs64,
-                })
-        return slides_data
+            print(f"无法读取图片 {image_path}: {e}")
+    
+    return slides_data
 
 
-#3.核心处理
+# 3.核心处理
 
-async def process_slide_vision(page_idx,images,bot,sem) -> str:
-    if not images: return ""
-
-    valid_descriptions = []
-    async def recogmnnize(img):
-        async with sem:
-            return await bot.describe_image(img)
-
-    results = await asyncio.gather(*[recogmnnize(img) for img in images])
-
-    for result in results:
-        if result:
-            valid_descriptions.append(result)
-
-    if not valid_descriptions: return ""
-
-    return "\n".join([f"图片{i+1}:{d}"for i,d in enumerate(valid_descriptions)])
-
-async  def generate_ppt_scripts(ppt_path:str, vision_config:Dict, text_gen_api_key:str):
-    parser = PPTparser(ppt_path)
-    slides = parser.extract_content()
+async def generate_presentation_scripts(
+    image_dir: str, vision_config: Dict
+):
+    # 从预转换的图片目录加载图片
+    slides = load_preconverted_images(image_dir)
     total_pages = len(slides)
 
-    p = vision_config.get("provider","glm")
-    if p == 'glm':
-        vision_bot = GlmVisionModel(vision_config["api_key"])
-    else:
-        raise ValueError(f"Unsupported provider:")
+    vision_bot = create_vlm(**vision_config)
 
-    #1
-    sem = asyncio.Semaphore(3)
-    prepared_data = []
-    vision_tasks = []
-
+    # 构建输入：将所有图片和文本信息按顺序组合
+    inputs = []
+    
     for slide in slides:
-        task = process_slide_vision(slide['page'], slide['images'], vision_bot, sem)
-        vision_tasks.append(task)
-
-        prepared_data.append({
-            "page":slide['page'],
-            "text":slide['text'],
-            "vision":None
+        # 添加页面文本内容
+        inputs.append({
+            "type": "text", 
+            "content": f"第{slide['page']}页内容：{slide['text']}\n"
         })
+        
+        # 添加该页的图片（使用VLM的预处理功能）
+        if 'image_path' in slide:
+            with open(slide['image_path'], 'rb') as img_file:
+                img_bytes = img_file.read()
+                # 只有在图像较大时才添加到输入
+                if len(img_bytes) > 3 * 1024:
+                    # 使用VLM的预处理功能处理图片
+                    processed_img_data = await vision_bot.preprocess_image(img_bytes)
+                    inputs.append({
+                        "type": "image",
+                        "data": processed_img_data
+                    })
+    
+    # 定义直接生成讲稿的提示
+    presentation_script_prompt = f"""
+    你现在是"树莓娘"，是网络开拓者协会（网协，北理工学生组织）的看板娘。
+    你正在进行一场技术分享会的直播，主题是关于演示文稿内容的讲解。
+    
+    请直接为整个演示文稿生成完整的讲解台词，不要做视觉描述分析，直接开始讲稿创作。
+    
+    【演示文稿内容】
+    以上包含了完整的演示文稿内容，包含多页幻灯片的图片和文字。
+    
+    【讲稿生成要求】
+    1. 每一页讲稿的最开头必须严格输出 `[PDF_x]` （x是对应页码）。
+       - 正确示例：`[PDF_1] 大家好！我是树莓娘...`
+       - 错误示例：`好的，第1页：大家好...`
+    2. 严禁 Markdown：绝对不要使用 `**加粗**`、`# 标题`、`- 列表` 等符号，直接用自然语言表达。
+    3. 逻辑衔接：严禁使用"下一页是"、"接下来看下一页"、"好的"、"好呀"这种报幕词。要用内容逻辑自然过渡。
+    4. 不要机械地朗读文字！要生动地讲解内容。
+    5. 用口语化的表达，不要读得太书面化。
+    6. 表情动作：说话时必须自然地穿插表情指令，仅限使用：[点头] [摇头] [wink]。平均每段话使用1~2个。
+    7. 如果某页文字极少（如仅有标题），请结合图片内容或主题进行发挥，不要只说一句话。
+    8. 讲稿需要有良好的连贯性和流畅的逻辑过渡。
+    9. 结尾处要有适当的总结和告别语。
+    10. 语气活泼，禁止 Markdown 符号 和 emoji 符号。
+    11. 避免使用"下一页"、"接下来"等报幕词，避免在开头说当前页码。
+    12. 不要说"好呀"、"好的"等口头禅。
+    13. 避免在开头回顾上一页内容，要直接切入主题。
+    14. 拒绝平铺直叙：不要把文字都念一遍！挑一个重点深入讲。
+    """
 
-    vision_results = await asyncio.gather(*vision_tasks)
-
-    outline_lines = []
-    for i,v_res in enumerate(vision_results):
-        prepared_data[i]['vision'] = v_res
-        preview = prepared_data[i]['text'].replace('\n', ' ')
-        outline_lines.append(f"第{i+1}页: {preview}")
-#        print(f"第{i+1}页，有效信息：{'have'if v_res and 'ignore' not in v_res else 'no'}")
-
-    global_outline = "\n".join(outline_lines)
-
-    #2
-
-    system_prompt = f"""
-        你现在是“树莓娘”，是网络开拓者协会（网协，北理工学生组织）的看板娘。
-        你正在进行一场技术分享会的直播，主题是关于PPT内容的讲解。
-        全局：{global_outline}
-
-        *** 核心风格 ***：
-        1. 不要机械地朗读PPT上的文字！要结合【视觉描述】和【文字内容】。   
-        2. 用口语化的表达，不要读得太书面化。
-        3. 表情动作：说话时必须自然地穿插表情指令，仅限使用：[点头] [摇头] [wink]。平均每段话使用1~2个。
-
-        *** 强制格式规范（必须严格遵守） ***：
-        1. PPT切换指令：每一页讲稿的**最开头**，必须严格输出 `[PPT_x]` （x是当前页码）。
-           - 正确示例：`[PPT_1] 大家好！我是树莓娘...`
-           - 错误示例：`好的，第1页：大家好...`
-        2. 严禁 Markdown：绝对不要使用 `**加粗**`、`# 标题`、`- 列表` 等符号，直接用自然语言表达。
-        3. 逻辑衔接：严禁使用“下一页是”、“接下来看下一页”、“好的”、"好呀"这种报幕词。要用内容逻辑自然过渡。
-           - 避免在开头说当前页码。
-
-        *** 视觉讲解逻辑 ***：
-        - 如果视觉描述显示是“图表/代码/截图”，请具体描述图里的细节（例如“大家看这行代码...”）。
-        - 如果视觉描述显示是“装饰/LOGO”，则忽略图片，专注于文字概念的讲解。
-        """
-
-    text_bot = GlmBot(
-        token = text_gen_api_key,
-        model_name = 'glm-4-flash',
-        system_prompt = system_prompt
-    )
-
+    # 使用VLM直接生成完整讲稿
+    full_script = await vision_bot.multimodal_request(inputs, presentation_script_prompt)
+    #logging.getLogger(__name__).debug(f"完整讲稿生成完成：{full_script}")
+    print(f"完整讲稿生成完成：{full_script}")
+    # 解析整体讲稿，分离每页内容
     full_results = []
-    last_script = "(开场)"
+    script_parts = full_script.split('[PDF_')
+    
+    # 处理第一部分（如果没有以[PDF_开头的部分）
+    if script_parts and not full_script.startswith('[PDF_'):
+        script_parts = script_parts[1:]  # 移除第一部分
+    
+    for part in script_parts:
+        if not part.strip():
+            continue
+            
+        # 提取页码和内容
+        parts = part.split(']', 1)
+        if len(parts) >= 2:
+            try:
+                page_num = int(parts[0])
+                content = parts[1].strip()
+                
+                # 找到对应的页面数据
+                page_data = next((d for d in slides if d["page"] == page_num), None)
+                if page_data:
+                    full_results.append({
+                        "page": page_num,
+                        "text": page_data["text"],
+                        "vision": "",  # 不再使用视觉描述
+                        "script": f"[PDF_{page_num}] {content}"
+                    })
+            except ValueError:
+                continue  # 如果无法解析页码，则跳过
 
-    for i, data in enumerate(prepared_data):
-        page = data['page']
+    # 确保所有页面都有对应的讲稿
+    for slide in slides:
+        if not any(r["page"] == slide["page"] for r in full_results):
+            # 如果某页没有生成讲稿，使用单独生成的方式
+            # 这里为了简化，我们不会真的单独生成，而是记录缺失
+            print(f"警告：第{slide['page']}页未能从整体讲稿中解析出内容")
+            # 为缺失的页面创建基本结构
+            full_results.append({
+                "page": slide["page"],
+                "text": slide["text"],
+                "vision": "",
+                "script": f"[PDF_{slide['page']}] 请补充讲稿内容"
+            })
 
-        next_info = "(这是最后一页，请进行总结并和大家说再见)"
-        if i < total_pages - 1:
-            next_data = prepared_data[i + 1]
-            next_txt = next_data['text'].replace('\n', ' ')
-            next_vision = next_data['vision'] if next_data['vision'] else "无重点图片"
-            next_info = f"下一页内容预览：文字提到了“{next_txt}”，视觉包含“{next_vision}”"
+    # 按页面顺序排序
+    full_results.sort(key=lambda x: x["page"])
 
-        prompt = f"""
-            当前任务：请生成第 {page} 页的讲解台词。
+    # 使用原始的PDF文件路径作为基础名，如果没有则使用目录名
+    pdf_path = os.path.join(image_dir, "dummy.pdf")  # 创建一个虚拟路径用于保存函数
+    save_files(pdf_path, full_results)
 
-            【当前页输入信息】
-            1. PPT文字内容：
-            {data['text']}
 
-            2. PPT图片描述：
-            {data['vision']}
-
-            3. 上一页讲稿：
-            “{last_script if last_script else '无'}”
-
-            4. {next_info}
-
-            【生成要求】
-            - 必须以 `[PPT_{page}]` 开头。
-            - 语气活泼，禁止 Markdown 符号 和 emoji 符号。
-            - 避免使用“下一页”、“接下来”等报幕词，避免在开头说当前页码。
-            - 不要说“好呀”、“好的”等口头禅。
-            - 避免在开头回顾上一页内容，要直接切入主题；上一页讲稿仅作为Callback参考。
-            - 拒绝平铺直叙：不要把PPT上的字都念一遍！挑一个重点深入讲。
-            - 包含 1-2 个表情（[点头]/[摇头]/[wink]）。
-            - 如果当前页文字极少（如仅有标题），请结合视觉描述或主题进行发挥，不要只说一句话。
-            """
-
-        text_bot.messages = []
-        text_bot.append_context(prompt)
-
-        script = await text_bot.respond_to_context()
-        last_script = script
-
-        full_results.append({
-            "page": page,
-            "text": data['text'],
-            "vision": data['vision'],
-            "script": script
-        })
-
-    save_files(ppt_path, full_results)
-
-def save_files(ppt_path, results):
+def save_files(pdf_path, results):
     """
-    保存四个文件:
-    1.*_json: 每页的PPT文字、视觉描述和讲解台词
-    2.*_ppt_text: 每页的文字内容
-    3.*_scripts: 每页的讲解
-    4.*_vision: 每页图片的视觉描述
-    保存在PPT文件所在目录下自动创建的名为 generated_scripts 的文件夹，
+    保存四个文件到指定目录下的 generated_scripts 文件夹:
+    1.*_data.json: 每页的PDF文字、视觉描述和讲解台词的完整数据
+    2.*_scripts.txt: 每页的讲解台词（包含 [PDF_x] 标记）
+    3.*_pdf_text.txt: 每页的原始文字内容
+    4.*_vision.txt: 每页图片的视觉描述（当前为空，因为我们直接生成讲稿）
+    
+    保存路径: 
+    - 如果输入是真实PDF路径: 在PDF同级目录下创建 generated_scripts 文件夹
+    - 如果输入是虚拟路径（如dummy.pdf）: 在图片目录下创建 generated_scripts 文件夹
     """
-    out_dir = os.path.join(os.path.dirname(os.path.abspath(ppt_path)), 'generated_scripts')
+    # 清理结果数据，移除任何不能序列化的字段（如图片字节数据）
+    cleaned_results = []
+    for item in results:
+        cleaned_item = {
+            "page": item.get("page"),
+            "text": item.get("text"),
+            "vision": item.get("vision", ""),
+            "script": item.get("script")
+        }
+        cleaned_results.append(cleaned_item)
+    
+    out_dir = os.path.join(
+        os.path.dirname(os.path.abspath(pdf_path)), "generated_scripts"
+    )
     if not os.path.exists(out_dir):
-         os.makedirs(out_dir)
+        os.makedirs(out_dir)
 
-    base = os.path.splitext(os.path.basename(ppt_path))[0]
+    base = os.path.splitext(os.path.basename(pdf_path))[0]
 
     json_path = os.path.join(out_dir, f"{base}_data.json")
-    with open(json_path, 'w', encoding='utf-8') as f:
-          json.dump(results, f, ensure_ascii=False, indent=4)
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(cleaned_results, f, ensure_ascii=False, indent=4)
 
     script_txt_path = os.path.join(out_dir, f"{base}_scripts.txt")
-    with open(script_txt_path, 'w', encoding='utf-8') as f:
-        for item in results:
-            # f.write(f"第{item['page']}页\n")
+    with open(script_txt_path, "w", encoding="utf-8") as f:
+        for item in cleaned_results:
             f.write(f"{item['script']}\n\n")
-            # f.write("\n\n")
 
     vision_txt_path = os.path.join(out_dir, f"{base}_vision.txt")
-    with open(vision_txt_path, 'w', encoding='utf-8') as f:
-        for item in results:
+    with open(vision_txt_path, "w", encoding="utf-8") as f:
+        for item in cleaned_results:
             f.write(f" 第 {item['page']} 页 \n")
-            f.write(f"{item['vision'] if item['vision'] else '(无有效视觉信息)'}\n")
+            f.write(f"{item['vision'] if item['vision'] else '(无视觉描述，直接生成讲稿)'}\n")
             f.write("\n")
 
-    ppt_text_path = os.path.join(out_dir, f"{base}_ppt_text.txt")
-    with open(ppt_text_path, 'w', encoding='utf-8') as f:
-        for item in results:
+    pdf_text_path = os.path.join(out_dir, f"{base}_pdf_text.txt")
+    with open(pdf_text_path, "w", encoding="utf-8") as f:
+        for item in cleaned_results:
             f.write(f" 第 {item['page']} 页 \n")
             f.write(f"{item['text']}\n")
             f.write("\n")
 
+
 from argparse import ArgumentParser
 
+
 def args_parse():
-    parser = ArgumentParser(description="PPT讲稿生成器")
-    parser.add_argument("ppt_path", type=str, help="PPT文件路径")
+    parser = ArgumentParser(
+        description="""演示文稿讲稿生成器
+        - 直接从预转换的图片目录生成讲解稿
+        - 无需事先生成视觉描述，直接使用VLM模型生成完整讲稿
+        - 输出4个文件到generated_scripts子目录: JSON数据、讲稿、原文、视觉描述（空）""",
+        epilog="""示例: python ppt_script.py ../frontend/public/documents/slides
+        
+        输出文件说明:
+        - [basename]_data.json: 每页的完整数据（文字、视觉、讲稿）
+        - [basename]_scripts.txt: 讲解台词（含[PDF_x]标记）
+        - [basename]_pdf_text.txt: 原始文字内容
+        - [basename]_vision.txt: 视觉描述（此项为空，因直接生成讲稿）
+        
+        生成的文件保存在图片目录下的 generated_scripts 子目录中."""
+    )
+    parser.add_argument("image_dir", type=str, help="图片目录路径（包含已转换的幻灯片图片，支持幻灯片*.PNG或slide_*.png格式）")
     return parser.parse_args()
+
 
 if __name__ == "__main__":
     from tokens import get_token
-    
-    VISION_CFG = {
-        "provider": "glm",
-        "api_key": get_token('glm')
-    }
-    TEXT_KEY = get_token('glm')
+    #logging.basicConfig(level=logging.DEBUG)
+
+    VISION_CFG = {"provider": "openai", "api_key": get_token("openai"), "model_name": "Qwen3.5-4B", "timeout": 1200}
     args = args_parse()
-    PPT_FILE = args.ppt_path
-    if os.path.exists(PPT_FILE):
-        asyncio.run(generate_ppt_scripts(PPT_FILE, VISION_CFG, TEXT_KEY))
+    IMAGE_DIR = args.image_dir
+    if os.path.exists(IMAGE_DIR):
+        asyncio.run(generate_presentation_scripts(IMAGE_DIR, VISION_CFG))
     else:
-        print("文件不存在")
+        print("目录不存在")

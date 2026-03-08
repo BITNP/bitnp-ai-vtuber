@@ -91,13 +91,13 @@ class BasicChattingAgent(Agent):
         async def handle_message_delta(data):
             content_chunk = data["content"]
             
-            # 1. 首先检查PPT翻页指令 - 最高优先级，不等待任何操作
+            # 1. 首先检查PPT/PDF翻页指令 - 最高优先级，不等待任何操作
             import re
-            pattern = r'\[(?:PPT_([0-9]+)|翻页:?\s*([0-9]+))\]'
+            pattern = r'\[(?:PPT_([0-9]+)|PDF_([0-9]+)|翻页:?\s*([0-9]+))\]'
             matches = list(re.finditer(pattern, content_chunk))
             
             for match in matches:
-                page_num = int(match.group(1) if match.group(1) else match.group(2))
+                page_num = int(match.group(1) if match.group(1) else (match.group(2) if match.group(2) else match.group(3)))
                 if 1 <= page_num <= 100:
                     # 立即发送翻页事件，不等待任何其他操作
                     await self.emit({"type": "flip_ppt_page", "page_num": page_num})
@@ -116,14 +116,15 @@ class BasicChattingAgent(Agent):
             import re
             
             # 匹配多种格式：
-            # 1. [PPT_2] (来自提示词的预期格式)
-            # 2. [翻页:1] 或 [翻页: 1] (旧格式)
-            pattern = r'\[(?:PPT_([0-9]+)|翻页:?\s*([0-9]+))\]'
+            # 1. [PPT_2] (来自PPT的格式)
+            # 2. [PDF_2] (来自PDF的格式)
+            # 3. [翻页:1] 或 [翻页: 1] (旧格式)
+            pattern = r'\[(?:PPT_([0-9]+)|PDF_([0-9]+)|翻页:?\s*([0-9]+))\]'
             match = re.search(pattern, response_content)
             
             if match:
-                # 获取匹配到的页码（从两个捕获组中取非None的那个）
-                page_num = int(match.group(1) if match.group(1) else match.group(2))
+                # 获取匹配到的页码（从三个捕获组中取非None的那个）
+                page_num = int(match.group(1) if match.group(1) else (match.group(2) if match.group(2) else match.group(3)))
                 await self.emit({"type": "flip_ppt_page", "page_num": page_num})
     
     def interrupt(self):

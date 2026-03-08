@@ -60,6 +60,8 @@ dependencies = [
     "python-pptx>=0.6.21",
     "pillow>=10.0.0",
     "openai>=2.20.0",
+    "requests>=2.31.0",
     "dataclasses>=0.8",
     "pathlib>=1.0.1",
+    "pdf2image>=1.17.0",
 ]

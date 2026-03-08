@@ -21,7 +21,7 @@ from tts.pcm2wav import pcm2wav
 
 from config_types import TTS_Config
 
-PPT_TAG_PATTERN = re.compile(r"\[(?:PPT_([0-9]+)|翻页:?\s*([0-9]+))\]")
+PPT_TAG_PATTERN = re.compile(r"\[(?:PPT_([0-9]+)|PDF_([0-9]+)|翻页:?\s*([0-9]+))\]")
 PPT_PAGE_NAME_PATTERN = re.compile(r"^.*?(\d+)\.[^.]+$")
 
 def _is_empty(content: str) -> bool:

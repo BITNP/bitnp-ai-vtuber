@@ -303,7 +303,7 @@ tts_instance = create_tts(**tts_config)
 
 讲稿驱动模式会读取 `*_scripts.txt`，自动播讲并翻页，并通过 `ppt_assets` 推送图片列表给前端。
 
-1. 托管 PPT 图片：
+1. 托管 PDF 图片：
 
 ``` shell
 cd backend
