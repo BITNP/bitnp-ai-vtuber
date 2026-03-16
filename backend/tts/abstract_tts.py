@@ -10,10 +10,10 @@ class AbstractTTS(ABC):
     def __init__(self, format: Format, **kwargs):
         self.format = format
 
-        if self.format == "pcm":
-            self.sample_rate = kwargs.get("sample_rate", 24000)
-            self.channels = kwargs.get("channels", 1)
-            self.bits_per_sample = kwargs.get("bits_per_sample", 16)
+        # 无论格式如何，都初始化音频属性，默认值与PCM格式相同
+        self.sample_rate = kwargs.get("sample_rate", 24000)
+        self.channels = kwargs.get("channels", 1)
+        self.bits_per_sample = kwargs.get("bits_per_sample", 16)
 
     @abstractmethod
     async def synthesize(self, text: str) -> bytes:

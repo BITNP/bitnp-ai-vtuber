@@ -641,9 +641,16 @@ export default {
               streamAudioPlayer.startStream();
             }
             const mediaData = data["media_data"];
+            const duration = data["duration"] || 0;
             // 立即更新字幕，不等待事件队列处理
             if (subtitle) {
-              subtitle.addDelta(data.content);
+              if (data["is_last"] && data.content) {
+                // 如果是完整的音频，使用setSubtitle并传递时长
+                subtitle.setSubtitle(data.content, duration);
+              } else {
+                // 流式数据仍使用addDelta
+                subtitle.addDelta(data.content);
+              }
             }
             // 添加音频数据并设置媒体ID（记录 promise，避免事件队列先消费）
             data["media_id_promise"] = streamAudioPlayer

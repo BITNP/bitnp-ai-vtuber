@@ -7,6 +7,7 @@ from typing import Literal, Union, Callable, Any
 import asyncio
 import json
 import websockets
+import logging
 
 import os
 import sys
@@ -18,7 +19,8 @@ EventData = dict
 
 class Agent:
     def __init__(self, server_url: str, agent_name: str):
-
+        self.logger = logging.getLogger(agent_name)
+        self.logger.setLevel(logging.DEBUG)
         # ensure the server_url is a valid websocket url
         if not (server_url.startswith("ws://") or server_url.startswith("wss://")):
             if server_url.startswith("https://"):
@@ -110,7 +112,7 @@ class Agent:
                 message = await self.check_message()
                 if not message:
                     continue
-                print(f"智能体 {self.agent_name} 接收事件: {message}") # DEBUG
+                self.logger.debug(f"智能体 {self.agent_name} 接收事件: {message}") # DEBUG
 
                 if type(message) is not dict:
                     continue
@@ -119,7 +121,7 @@ class Agent:
                 event_data: dict = message.get("data", {})
                 event_type: str = event_data.get("type", "")
 
-                print(self._event_handlers.get(event_type, None)) # DEBUG
+                self.logger.debug(f"智能体 {self.agent_name} 处理事件类型: {event_type}") # DEBUG
 
                 # event handlers
                 if event_type != "loop" and event_type in self._event_handlers:
@@ -162,5 +164,3 @@ class Agent:
 
             for task in tasks:
                 await task
-
-                

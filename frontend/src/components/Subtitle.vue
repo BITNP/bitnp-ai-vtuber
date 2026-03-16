@@ -19,14 +19,19 @@ export default {
         return {
             display: '',
             target: '',
-            speed: 10, // characters per second
+            speed: 10, // 默认characters per second
+            duration: 0, // 音频时长（秒）
+            startTime: null, // 开始时间
+            updateInterval: null, // 更新间隔ID
         }
     },
 
     methods: {
-        setSubtitle(subtitle) {
+        setSubtitle(subtitle, duration = 0) {
             this.target = String(subtitle);
             this.display = '';
+            this.duration = duration;
+            this.startTime = Date.now();
         },
 
         addDelta(delta) {
@@ -39,16 +44,38 @@ export default {
 
         clear() {
             this.setSubtitle('');
+        },
+
+        updateDisplay() {
+            if (!this.enable || this.display === this.target) {
+                return;
+            }
+            
+            if (this.duration > 0 && this.target.length > 0) {
+                // 根据音频时长计算当前应该显示的文本长度
+                const elapsedTime = (Date.now() - this.startTime) / 1000;
+                const progress = Math.min(elapsedTime / this.duration, 1);
+                const targetLength = Math.floor(progress * this.target.length);
+                this.display = this.target.slice(0, targetLength);
+            } else {
+                // 使用默认速度
+                this.display = this.target.slice(0, this.display.length + 1);
+            }
         }
     },
 
     mounted() {
         const self = this;
-        setInterval(() => {
-            if (self.enable && self.display !== self.target) {
-                self.display = self.target.slice(0, self.display.length + 1);
-            }
-        }, 1000 / self.speed);
+        // 设置更短的更新间隔以获得更平滑的效果
+        this.updateInterval = setInterval(() => {
+            self.updateDisplay();
+        }, 50); // 20fps更新频率
+    },
+    
+    beforeUnmount() {
+        if (this.updateInterval) {
+            clearInterval(this.updateInterval);
+        }
     }
 }
 </script>

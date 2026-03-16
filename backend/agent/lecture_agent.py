@@ -15,7 +15,7 @@ from typing import List, Dict, Optional
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-from stream_node import SentenceSepNode, BracketsParsorNode, LambdaNode
+#from stream_node import SentenceSepNode, BracketsParsorNode, LambdaNode
 from tts import create_tts
 from tts.pcm2wav import pcm2wav
 
@@ -52,7 +52,6 @@ class LectureAgent(Agent):
         **_kwargs,
     ):
         super().__init__(server_url, agent_name)
-
         self.tts = create_tts(**tts_config)
         self.tts_stream = tts_stream
 
@@ -70,18 +69,19 @@ class LectureAgent(Agent):
         self._audio_seq = 0
         self._audio_waiters: dict[int, asyncio.Future] = {}
         self._audio_wait_timeout = 300
-
+        self._background_tts_task: Optional[asyncio.Task] = None
+        self._audio_data: List[asyncio.Future] = []
         # streaming workflow: sentence_sep -> brackets_parsor -> event_emitter
-        self.sentence_sep_node = SentenceSepNode(seps="\n")
-        self.brackets_parsor_node = BracketsParsorNode()
+        #self.sentence_sep_node = SentenceSepNode(seps="\n")
+        #self.brackets_parsor_node = BracketsParsorNode()
 
-        async def event_emitter_lambda(_, data):
-            await self.handle_event(data)
+        #async def event_emitter_lambda(_, data):
+        #    await self.handle_event(data)
 
-        self.event_emitter = LambdaNode(event_emitter_lambda)
+        #self.event_emitter = LambdaNode(event_emitter_lambda)
 
-        self.sentence_sep_node.connect_to(self.brackets_parsor_node)
-        self.brackets_parsor_node.connect_to(self.event_emitter)
+        #self.sentence_sep_node.connect_to(self.brackets_parsor_node)
+        #self.brackets_parsor_node.connect_to(self.event_emitter)
 
         @self.on("lecture_control")  # type: ignore[misc]
         async def handle_lecture_control(_, timestamp: str, event_data: EventData):
@@ -220,9 +220,36 @@ class LectureAgent(Agent):
                 await self._play_task
             except asyncio.CancelledError:
                 pass
-        self.sentence_sep_node.reset()
+        if self._background_tts_task:
+            self._background_tts_task.cancel()
+            try:
+                await self._background_tts_task
+            except asyncio.CancelledError:
+                pass
+        #self.sentence_sep_node.reset()
         self._pause_event.set()
+        
+        # 初始化_audio_data列表，为每个脚本项创建一个Future对象
+        loop = asyncio.get_event_loop()
+        self._audio_data = [loop.create_future() for _ in self._scripts]
+        
         self._play_task = asyncio.create_task(self._play_from_index(index))
+        if not self.tts_stream:
+            self._background_tts_task = asyncio.create_task(self._background_tts(index))
+
+    async def _background_tts(self, index: int):
+        for i in range(index, len(self._scripts)):
+            self.logger.debug(f"合成索引为{i}的脚本")
+            content = self._scripts[i].get("content", "")
+            media_data = await self.tts.synthesize(content)
+            if self.tts.format == "pcm":
+                media_data = pcm2wav(
+                    media_data,
+                    sample_rate=self.tts.sample_rate,
+                    channels=self.tts.channels,
+                    bits_per_sample=self.tts.bits_per_sample,
+                )
+            self._audio_data[i].set_result(media_data)
 
     def _find_index_by_page(self, page_num: int) -> Optional[int]:
         for idx, item in enumerate(self._scripts):
@@ -249,34 +276,51 @@ class LectureAgent(Agent):
 
                 await self.emit({"type": "start_of_response"})
 
-                await self.sentence_sep_node.handle(content)
-                await self.sentence_sep_node.flush()
+                #await self.sentence_sep_node.handle(content)
+                #await self.sentence_sep_node.flush()
+                try:
+                    self._audio_seq += 1
+                    seq = self._audio_seq
+                    loop = asyncio.get_event_loop()
+                    self._audio_waiters[seq] = loop.create_future()
 
-                await self.emit({"type": "end_of_response", "response": content})
-        except asyncio.CancelledError:
-            return
+                    if self.tts_stream:
+                        first_pack = True
+                        buffered_chunk: bytes | None = None
 
-    async def handle_event(self, data: dict):
-        data_type = data.get("type", "")
-        content = data.get("content", "")
+                        async for media_data in self.tts.synthesize_stream(content):  # type: ignore[misc]
+                            if buffered_chunk is None:
+                                buffered_chunk = media_data
+                                continue
 
-        await asyncio.sleep(0)
+                            if self.tts.format == "pcm":
+                                buffered_chunk = pcm2wav(
+                                    buffered_chunk,
+                                    sample_rate=self.tts.sample_rate,
+                                    channels=self.tts.channels,
+                                    bits_per_sample=self.tts.bits_per_sample,
+                                )
+                            base64_data = base64.b64encode(buffered_chunk).decode("utf-8")
 
-        if data_type == "text":
-            try:
-                self._audio_seq += 1
-                seq = self._audio_seq
-                loop = asyncio.get_event_loop()
-                self._audio_waiters[seq] = loop.create_future()
+                            display_text = content if first_pack else ""
+                            first_pack = False
 
-                if self.tts_stream:
-                    first_pack = True
-                    buffered_chunk: bytes | None = None
+                            await self.emit({
+                                "type": "say_aloud",
+                                "content": display_text,
+                                "media_data": base64_data,
+                                "format": "wav",
+                                "seq": seq,
+                                "is_last": False,
+                            })
 
-                    async for media_data in self.tts.synthesize_stream(content):  # type: ignore[misc]
-                        if buffered_chunk is None:
                             buffered_chunk = media_data
-                            continue
+
+                        if buffered_chunk is None:
+                            waiter = self._audio_waiters.pop(seq, None)
+                            if waiter and not waiter.done():
+                                waiter.set_result(True)
+                            return
 
                         if self.tts.format == "pcm":
                             buffered_chunk = pcm2wav(
@@ -288,7 +332,6 @@ class LectureAgent(Agent):
                         base64_data = base64.b64encode(buffered_chunk).decode("utf-8")
 
                         display_text = content if first_pack else ""
-                        first_pack = False
 
                         await self.emit({
                             "type": "say_aloud",
@@ -296,71 +339,38 @@ class LectureAgent(Agent):
                             "media_data": base64_data,
                             "format": "wav",
                             "seq": seq,
-                            "is_last": False,
+                            "is_last": True,
+                        })
+                    else:
+                        media_data = await self._audio_data[i]
+                        base64_data = base64.b64encode(media_data).decode("utf-8")
+                        # 计算音频持续时间：数据部分长度 / (采样率 * 声道数 * (位深度/8))
+                        # wav文件头大小为44字节，所以数据部分长度为总长度减去44
+                        data_length = len(media_data) - 44
+                        bytes_per_sample = self.tts.bits_per_sample // 8
+                        duration = data_length / (self.tts.sample_rate * self.tts.channels * bytes_per_sample)
+                        self.logger.debug(f"音频持续时间: {duration:.3f}秒")
+                        await self.emit({
+                            "type": "say_aloud",
+                            "content": content,
+                            "media_data": base64_data,
+                            "format": "wav",
+                            "seq": seq,
+                            "is_last": True,
+                            "duration": duration,
                         })
 
-                        buffered_chunk = media_data
+                    waiter = self._audio_waiters.get(seq)
+                    if waiter:
+                        try:
+                            await asyncio.wait_for(waiter, timeout=self._audio_wait_timeout)
+                        except asyncio.TimeoutError:
+                            pass
+                        finally:
+                            self._audio_waiters.pop(seq, None)
+                except Exception as e:
+                    print(f"TTS合成出错: {e}")
 
-                    if buffered_chunk is None:
-                        waiter = self._audio_waiters.pop(seq, None)
-                        if waiter and not waiter.done():
-                            waiter.set_result(True)
-                        return
-
-                    if self.tts.format == "pcm":
-                        buffered_chunk = pcm2wav(
-                            buffered_chunk,
-                            sample_rate=self.tts.sample_rate,
-                            channels=self.tts.channels,
-                            bits_per_sample=self.tts.bits_per_sample,
-                        )
-                    base64_data = base64.b64encode(buffered_chunk).decode("utf-8")
-
-                    display_text = content if first_pack else ""
-
-                    await self.emit({
-                        "type": "say_aloud",
-                        "content": display_text,
-                        "media_data": base64_data,
-                        "format": "wav",
-                        "seq": seq,
-                        "is_last": True,
-                    })
-                else:
-                    media_data = await self.tts.synthesize(content)
-                    if self.tts.format == "pcm":
-                        media_data = pcm2wav(
-                            media_data,
-                            sample_rate=self.tts.sample_rate,
-                            channels=self.tts.channels,
-                            bits_per_sample=self.tts.bits_per_sample,
-                        )
-                    base64_data = base64.b64encode(media_data).decode("utf-8")
-                    await self.emit({
-                        "type": "say_aloud",
-                        "content": content,
-                        "media_data": base64_data,
-                        "format": "wav",
-                        "seq": seq,
-                        "is_last": True,
-                    })
-
-                waiter = self._audio_waiters.get(seq)
-                if waiter:
-                    try:
-                        await asyncio.wait_for(waiter, timeout=self._audio_wait_timeout)
-                    except asyncio.TimeoutError:
-                        pass
-                    finally:
-                        self._audio_waiters.pop(seq, None)
-            except Exception as e:
-                print(f"TTS合成出错: {e}")
-        elif data_type == "tag":
-            tag_content = str(content)
-            match = PPT_TAG_PATTERN.match(f"[{tag_content}]")
-            if match:
-                page_num = match.group(1) or match.group(2)
-                if page_num:
-                    await self.emit({"type": "flip_ppt_page", "page_num": int(page_num)})
-                return
-            await self.emit({"type": "bracket_tag", "content": tag_content})
+                await self.emit({"type": "end_of_response", "response": content})
+        except asyncio.CancelledError:
+            return
