@@ -188,6 +188,10 @@ export default {
       enableFullScreen: false,
       allowPauseDictation: true,
 
+      // STT 配置
+      sttBackendUrl: "http://localhost:9236",
+      sttSocket: null,
+
       // 性能优化配置
       maxEventQueueSize: 10000, // 事件队列最大值，防止无限增长
       activePreloadCount: 0, // 当前活跃的预加载数
@@ -395,6 +399,70 @@ export default {
       // }
       // this.audioBank.handleUserGesture();
       this.audioEnabled = true;
+
+      this.startSttPolling();
+    },
+
+    startSttPolling() {
+      if (this.sttSocket) {
+        this.sttSocket.close();
+      }
+
+      const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+      const wsUrl = `${protocol}${this.sttBackendUrl.replace(/^http:\/\//, '')}/socket.io/?EIO=4&transport=websocket`;
+      
+      this.sttSocket = new WebSocket(this.sttBackendUrl.replace('http://', 'ws://') + '/socket.io/?EIO=4&transport=websocket');
+      
+      this.sttSocket.onopen = () => {
+        console.log('STT WebSocket connected');
+        this.sttSocket.send('40{"cid":"","namespace":"/"}');
+      };
+      
+      this.sttSocket.onmessage = (event) => {
+        const data = event.data;
+        
+        if (data.startsWith('42')) {
+          const jsonStr = data.slice(2);
+          try {
+            const msg = JSON.parse(jsonStr);
+            if (msg[0] === 'stt_result') {
+              const result = msg[1];
+              console.log('STT result:', result);
+              
+              if (!this.wsClient) return;
+              
+              this.wsClient.sendData({
+                type: 'event',
+                data: { type: 'asr_result', text: result.text, is_speech: true }
+              });
+
+              if (result.is_question || result.type === 'question_detected') {
+                this.wsClient.sendData({
+                  type: 'event',
+                  data: { type: 'question_detected', question: result.text }
+                });
+              }
+            }
+          } catch (e) {
+            console.error('Parse STT message error:', e);
+          }
+        }
+      };
+      
+      this.sttSocket.onerror = (err) => {
+        console.error('STT WebSocket error:', err);
+      };
+      
+      this.sttSocket.onclose = () => {
+        console.log('STT WebSocket closed');
+      };
+    },
+
+    stopSttPolling() {
+      if (this.sttSocket) {
+        this.sttSocket.close();
+        this.sttSocket = null;
+      }
     },
 
     async recordChat(message) {

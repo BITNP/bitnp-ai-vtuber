@@ -1,0 +1,12 @@
+[project]
+name = "omnivoice-tts"
+version = "0.1.0"
+description = "OmniVoice TTS wrapper"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "soundfile>=0.13.1",
+    "torch==2.8.0+cu128",
+    "torchaudio==2.8.0+cu128",
+    "omnivoice",
+]

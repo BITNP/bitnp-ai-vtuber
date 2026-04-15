@@ -1,11 +1,13 @@
 from .abstract_agent import Agent
 from .basic_chatting_agent import BasicChattingAgent
 from .lecture_agent import LectureAgent
+from .interactive_lecture_agent import InteractiveLectureAgent
 from config_types import LLM_Config
 
 REGISTRY = {
     "basic_chatting_agent": BasicChattingAgent,
     "lecture_agent": LectureAgent,
+    "interactive_lecture_agent": InteractiveLectureAgent,
 }
 
 def create_agent(agent_type: str, server_url: str, agent_name: str, llm_api_config: LLM_Config | None = None, **kwargs) -> Agent:

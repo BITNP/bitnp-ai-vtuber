@@ -63,7 +63,27 @@ class Dashscope_TTS_Config(CompatibaleModel):
     voice: str
 
 
-TTS_Config = Union[Genie_TTS_Config, Dashscope_TTS_Config]
+class OmniVoice_TTS_Config(CompatibaleModel):
+    """
+    Config for OmniVoice TTS
+    
+    安装依赖:
+        cd backend/tts/omnivoice
+        uv venv .venv
+        source .venv/bin/activate
+        uv sync --extra cuda
+        python download_model.py
+    """
+
+    tts_method_name: str = "omnivoice"
+    model_path: str = "backend/tts/omnivoice/models/k2-fsa/OmniVoice"
+    device: str = "auto"
+    dtype: str = "float16"
+    ref_audio: str | None = None
+    ref_text: str | None = None
+
+
+TTS_Config = Union[Genie_TTS_Config, Dashscope_TTS_Config, OmniVoice_TTS_Config]
 
 
 class VLM_Config(CompatibaleModel):
@@ -85,3 +105,20 @@ class AgentConfig(CompatibaleModel):
     agent_name: str
     llm_api_config: LLM_Config
     tts_stream: bool = False
+
+
+class InteractiveLectureAgentConfig(CompatibaleModel):
+    """
+    Config for InteractiveLectureAgent
+    
+    支持背景图片、文字稿循环播放、语音识别打断、上下文压缩
+    """
+
+    agent_type: str = "interactive_lecture_agent"
+    llm_api_config: LLM_Config
+    tts_config: TTS_Config
+    tts_stream: bool = False
+    background_image: str | None = None
+    system_prompt: str | None = None
+    script_path: str | None = None
+    context_compress_threshold: float = 0.5

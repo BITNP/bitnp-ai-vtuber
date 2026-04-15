@@ -111,6 +111,97 @@ cd backend
 uv run run_agent.py --agent-type lecture_agent --lecture-script <*_scripts.txt 或 generated_scripts 目录> --ppt-images-dir <图片目录>
 ```
 
+#### 4.2.4 交互式讲稿驱动（interactive_lecture_agent）
+
+`interactive_lecture_agent` 支持背景图片、文字稿循环播放、语音识别打断、上下文压缩功能。
+
+**功能特点：**
+- 文字稿循环播放
+- 语音识别检测用户说话，自动暂停播放
+- 问题检测，检测到问题时自动回答用户问题
+- 上下文超过阈值时自动压缩，防止溢出
+
+**通信架构：**
+
+```
+┌─────────────────┐   WebSocket   ┌─────────────────┐   WebSocket   ┌─────────────────┐
+│  STT 后端       │ ◄──────────► │   前端 Vue      │ ◄──────────► │ Agent 后端      │
+│ (stt_backend)  │   Socket.IO   │                 │              │                 │
+│ 端口: 9236     │               │                 │              │                 │
+└─────────────────┘               └─────────────────┘              └─────────────────┘
+       │                                   │                                   │
+       │ 1. 麦克风录音                      │ 2. 转发事件                        │ 3. 处理事件
+       │ 2. Silero VAD 检测                 │    - asr_result                   │    - 暂停播放
+       │ 3. FunASR 识别                    │    - question_detected            │    - 回答问题
+       │ 4. Socket.IO 推送                  │                                   │    - 继续播放
+       └───────────────────────────────────┴───────────────────────────────────┘
+```
+
+**前置准备：**
+
+1. 安装 STT 依赖：
+
+``` shell
+cd frontend/stt
+uv sync
+```
+
+2. 启动 STT 语音识别后端（使用 Socket.IO WebSocket）：
+
+``` shell
+cd frontend/stt
+uv run python stt_backend.py
+```
+
+**启动命令：**
+
+``` shell
+cd backend
+uv run run_agent.py \
+  --agent-type interactive_lecture_agent \
+  --lecture-script <文字稿路径> \
+  --background-image <背景图片路径> \
+  --system-prompt "角色设定" \
+  --context-compress-threshold 0.5
+```
+
+**参数说明：**
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--agent-type` | Agent 类型 | `basic_chatting_agent` |
+| `--lecture-script` | 文字稿路径（txt 文件或目录） | 无 |
+| `--background-image` | 背景图片路径 | 无 |
+| `--system-prompt` | 角色系统提示 | 无 |
+| `--context-compress-threshold` | 上下文压缩阈值 (0.0-1.0) | 0.5 |
+
+**文字稿格式：**
+
+支持两种格式：
+- 单文件：使用空行分隔段落
+- 目录：目录下所有 `.txt` 文件按文件名排序
+
+**工作流程：**
+
+1. 启动 STT 后端（端口 9236）
+2. 启动后端服务器
+3. 启动 Agent
+4. 启动前端，点击"启用音频"按钮
+5. 当前端检测到用户说话时，自动暂停文字稿播放
+6. 当前端检测到问题时，自动调用 LLM 回答问题，回答完成后继续播放
+
+**事件类型：**
+
+| 事件名 | 说明 |
+|--------|------|
+| `asr_result` | 语音识别结果 |
+| `question_detected` | 检测到问题 |
+| `paused_for_question` | 因回答问题暂停 |
+| `answering_question` | 正在回答问题 |
+| `context_compressed` | 上下文已压缩 |
+| `script_changed` | 文字稿段落切换 |
+| `show_background_image` | 显示背景图片 |
+
 #### 讲稿部分的TODO :construction:
 
 - 语音合成优化

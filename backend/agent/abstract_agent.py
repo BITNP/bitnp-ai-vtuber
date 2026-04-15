@@ -149,6 +149,9 @@ class Agent:
         async with websockets.connect(uri) as ws:
             self.ws = ws
 
+            if hasattr(self, 'initialize') and asyncio.iscoroutinefunction(self.initialize):
+                await self.initialize()
+
             tasks = []
             tasks.append(asyncio.create_task(self.main_loop()))
 

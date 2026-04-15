@@ -1,0 +1,16 @@
+[project]
+name = "stt"
+version = "0.1.0"
+description = "Speech-to-Text dependencies for frontend"
+requires-python = ">=3.10"
+dependencies = [
+    "funasr>=1.0.27",
+    "silero-vad>=5.0",
+    "torch>=2.0.0",
+    "sounddevice>=0.5.0",
+    "numpy>=1.24.0",
+    "flask>=3.0.0",
+    "flask-cors>=4.0.0",
+    "flask-socketio>=5.3.0",
+    "requests>=2.31.0",
+]
