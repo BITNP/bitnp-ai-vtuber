@@ -121,22 +121,6 @@ uv run run_agent.py --agent-type lecture_agent --lecture-script <*_scripts.txt �
 - 问题检测，检测到问题时自动回答用户问题
 - 上下文超过阈值时自动压缩，防止溢出
 
-**通信架构：**
-
-```
-┌─────────────────┐   WebSocket   ┌─────────────────┐   WebSocket   ┌─────────────────┐
-│  STT 后端       │ ◄──────────► │   前端 Vue      │ ◄──────────► │ Agent 后端      │
-│ (stt_backend)  │   Socket.IO   │                 │              │                 │
-│ 端口: 9236     │               │                 │              │                 │
-└─────────────────┘               └─────────────────┘              └─────────────────┘
-       │                                   │                                   │
-       │ 1. 麦克风录音                      │ 2. 转发事件                        │ 3. 处理事件
-       │ 2. Silero VAD 检测                 │    - asr_result                   │    - 暂停播放
-       │ 3. FunASR 识别                    │    - question_detected            │    - 回答问题
-       │ 4. Socket.IO 推送                  │                                   │    - 继续播放
-       └───────────────────────────────────┴───────────────────────────────────┘
-```
-
 **前置准备：**
 
 1. 安装 STT 依赖：
@@ -146,14 +130,29 @@ cd frontend/stt
 uv sync
 ```
 
-2. 启动 STT 语音识别后端（使用 Socket.IO WebSocket）：
+2. 启动 STT 语音识别后端：
 
 ``` shell
 cd frontend/stt
 uv run python stt_backend.py
 ```
 
+> **参数说明：**
+> - `--device <索引>`: 指定音频输入设备索引（通过 `--list-devices` 查看可用设备）
+> - `--list-devices`: 列出所有可用的音频输入设备
+
 **启动命令：**
+
+> 注意：背景图片需要通过后端服务器托管，需要先启动静态资源服务。
+
+1. 启动后端静态资源托管：
+
+``` shell
+cd backend
+uv run run_server.py --ppt-images-dir <图片目录>
+```
+
+2. 启动交互式讲稿 Agent：
 
 ``` shell
 cd backend
@@ -161,6 +160,7 @@ uv run run_agent.py \
   --agent-type interactive_lecture_agent \
   --lecture-script <文字稿路径> \
   --background-image <背景图片路径> \
+  --ppt-base-url /documents/slides \
   --system-prompt "角色设定" \
   --context-compress-threshold 0.5
 ```
@@ -171,7 +171,8 @@ uv run run_agent.py \
 |------|------|--------|
 | `--agent-type` | Agent 类型 | `basic_chatting_agent` |
 | `--lecture-script` | 文字稿路径（txt 文件或目录） | 无 |
-| `--background-image` | 背景图片路径 | 无 |
+| `--background-image` | 背景图片路径（会被当作第1页PPT） | 无 |
+| `--ppt-base-url` | PPT 资源基础 URL | `/documents/slides` |
 | `--system-prompt` | 角色系统提示 | 无 |
 | `--context-compress-threshold` | 上下文压缩阈值 (0.0-1.0) | 0.5 |
 
@@ -200,7 +201,9 @@ uv run run_agent.py \
 | `answering_question` | 正在回答问题 |
 | `context_compressed` | 上下文已压缩 |
 | `script_changed` | 文字稿段落切换 |
-| `show_background_image` | 显示背景图片 |
+| `show_background_image` | 显示背景图片（已改为 ppt_assets + flip_ppt_page） |
+| `ppt_assets` | PPT 图片资源列表 |
+| `flip_ppt_page` | 切换 PPT 页面 |
 
 #### 讲稿部分的TODO :construction:
 

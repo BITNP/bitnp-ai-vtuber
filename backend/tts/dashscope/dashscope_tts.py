@@ -6,7 +6,7 @@ import queue
 import asyncio
 
 from dashscope.audio.qwen_tts_realtime import QwenTtsRealtime, QwenTtsRealtimeCallback, AudioFormat
-from ..abstract_tts import AbstractTTS
+from tts.abstract_tts import AbstractTTS
 from typing import Literal, AsyncGenerator, List
 
 PCM_Format = Literal['pcm']
@@ -188,4 +188,3 @@ class DashscopeTTS(AbstractTTS):
         async for chunk in self.synthesize_stream(text, chunk_delay):
             audio_chunks.append(chunk)
         return b''.join(audio_chunks)
-

@@ -3,10 +3,22 @@ name = "omnivoice-tts"
 version = "0.1.0"
 description = "OmniVoice TTS wrapper"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "soundfile>=0.13.1",
     "torch==2.8.0+cu128",
     "torchaudio==2.8.0+cu128",
+    "aiohttp>=3.9.0",
     "omnivoice",
 ]
+
+[tool.uv]
+index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchaudio = { index = "pytorch-cu128" }

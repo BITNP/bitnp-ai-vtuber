@@ -42,6 +42,8 @@ punc_model = None
 STT_BACKEND_PORT = 9236
 connected_clients = set()
 
+DEVICE_INDEX = None  # 默认使用系统默认设备，可通过命令行参数指定
+
 QUESTION_KEYWORDS = [
     "吗", "呢", "啊", "?", "？", "怎么", "为什么", "什么", "哪", "谁", "多少", "几",
     "是不是", "有没有", "可不可以", "能不能", "会不会", "能不能"
@@ -110,16 +112,20 @@ def vad_callback(indata, frames, time, status):
     except NameError:
         prev_recording = False
     
-    if not prev_recording and len(speech_timestamps) > 0:
+    current_recording = len(speech_timestamps) > 0
+    
+    if not prev_recording and current_recording:
         with buffer_lock:
             speech_buffer = audio_frame.copy()
         recording = True
         print(f"🔊 语音开始")
     
-    elif prev_recording and len(speech_timestamps) == 0:
+    elif prev_recording and not current_recording:
         recording = False
         speech_ends = True
         print(f"🔇 语音结束")
+    
+    prev_recording = current_recording
 
 
 def is_question(text: str) -> bool:
@@ -275,8 +281,13 @@ def start_audio_capture():
     
     print(f"使用采样率: {SAMPLE_RATE}, 设备帧大小: {FRAME_SIZE}")
     
+    if DEVICE_INDEX is not None:
+        print(f"使用设备索引: {DEVICE_INDEX}")
+    else:
+        print("使用系统默认设备")
+    
     with sd.InputStream(
-        device=None,
+        device=DEVICE_INDEX,
         samplerate=SAMPLE_RATE,
         blocksize=FRAME_SIZE,
         channels=1,
@@ -289,7 +300,33 @@ def start_audio_capture():
 
 
 if __name__ == '__main__':
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="STT Backend")
+    parser.add_argument("--device", type=int, default=None, help="音频输入设备索引")
+    parser.add_argument("--list-devices", action="store_true", help="列出所有音频输入设备")
+    args = parser.parse_args()
+    
+    import sounddevice as sd
+    
+    if args.list_devices:
+        print("可用音频输入设备:")
+        devices = sd.query_devices()
+        for i, device in enumerate(devices):
+            if device['max_input_channels'] > 0:
+                print(f"  设备索引 {i}: {device['name']} (采样率: {device['default_samplerate']})")
+        exit(0)
+    
+    if args.device is not None:
+        DEVICE_INDEX = args.device
+    
     init_models()
+    
+    print("可用音频输入设备:")
+    devices = sd.query_devices()
+    for i, device in enumerate(devices):
+        if device['max_input_channels'] > 0:
+            print(f"  设备索引 {i}: {device['name']} (采样率: {device['default_samplerate']})")
     
     process_thread = Thread(target=process_speech, daemon=True)
     process_thread.start()

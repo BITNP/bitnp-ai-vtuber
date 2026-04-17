@@ -1,4 +1,4 @@
-from ..abstract_tts import AbstractTTS
+from tts.abstract_tts import AbstractTTS
 from .functional_api import define_speaker, get_tts_wav
 from uuid import uuid4 as uuid
 

@@ -2,14 +2,16 @@ import importlib.util
 from .abstract_tts import AbstractTTS
 from .genie import GenieTTS
 from .dashscope import DashscopeTTS
+from .http_tts import HttpTTS
 from typing import Literal, Type
 
 REGISTRY: dict[str, Type[AbstractTTS]] = {
     "genie": GenieTTS,
     "dashscope": DashscopeTTS,
+    "http": HttpTTS,
 }
 
-Available_TTS_Methods = Literal["genie", "dashscope", "omnivoice"]
+Available_TTS_Methods = Literal["genie", "dashscope", "omnivoice", "http"]
 
 
 def create_tts(tts_method_name: Available_TTS_Methods, **kwargs) -> AbstractTTS:

@@ -83,7 +83,26 @@ class OmniVoice_TTS_Config(CompatibaleModel):
     ref_text: str | None = None
 
 
-TTS_Config = Union[Genie_TTS_Config, Dashscope_TTS_Config, OmniVoice_TTS_Config]
+class Http_TTS_Config(CompatibaleModel):
+    """
+    Config for HTTP TTS (调用远程 OmniVoice 服务)
+    
+    使用方法:
+        1. 在 omnivoice 虚拟环境中启动服务:
+            cd backend/tts/omnivoice
+            source .venv/bin/activate
+            python tts_server.py --port 9237
+        
+        2. 配置 Http_TTS_Config
+    """
+
+    tts_method_name: str = "http"
+    base_url: str = "http://127.0.0.1:9237"
+    ref_audio: str | None = None
+    ref_text: str | None = None
+
+
+TTS_Config = Union[Genie_TTS_Config, Dashscope_TTS_Config, OmniVoice_TTS_Config, Http_TTS_Config]
 
 
 class VLM_Config(CompatibaleModel):

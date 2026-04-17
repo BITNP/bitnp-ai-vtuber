@@ -157,6 +157,9 @@ import LIVE2D_CONFIG from "@/agent-presets/shumeiniang/live2dConfig.js";
 import FrontendAgent from "@/ws-client/FrontendAgent";
 import Subtitle from "@/components/Subtitle.vue";
 import StreamAudioPlayer from "@/components/StreamAudioPlayer.js";
+import { io } from "socket.io-client";
+
+const STT_BACKEND_URL = "http://localhost:9236";
 
 export default {
   components: {
@@ -188,16 +191,13 @@ export default {
       enableFullScreen: false,
       allowPauseDictation: true,
 
-      // STT 配置
-      sttBackendUrl: "http://localhost:9236",
-      sttSocket: null,
-
       // 性能优化配置
       maxEventQueueSize: 10000, // 事件队列最大值，防止无限增长
       activePreloadCount: 0, // 当前活跃的预加载数
       maxConcurrentPreloads: 3, // 最多同时预加载3张图片
       rafId: null, // 保存 RAF ID 以便清理
       keydownHandler: null, // 保存 keydown 事件处理器以便清理
+      sttSocket: null, // STT 后端 Socket.IO 连接
     };
   },
 
@@ -209,9 +209,58 @@ export default {
         this.exitFullscreen();
       }
     },
+    enableDictation(newVal) {
+      this.updateSttEnabled(newVal);
+    },
   },
 
   methods: {
+    initSttSocket() {
+      if (this.sttSocket) {
+        return;
+      }
+      this.sttSocket = io(STT_BACKEND_URL, {
+        transports: ["websocket"],
+        reconnection: true,
+      });
+
+      this.sttSocket.on("connect", () => {
+        console.log("STT 后端 Socket.IO 已连接");
+      });
+
+      this.sttSocket.on("disconnect", () => {
+        console.log("STT 后端 Socket.IO 已断开");
+      });
+
+      this.sttSocket.on("stt_result", (data) => {
+        console.log("收到 STT 识别结果:", data);
+        this.handleSttResult(data);
+      });
+    },
+
+    handleSttResult(data) {
+      if (!this.wsClient) {
+        return;
+      }
+      const eventType = data.type;
+      if (eventType === "asr_result" || eventType === "question_detected") {
+        this.wsClient.sendData({
+          type: "event",
+          data: data,
+        });
+      }
+    },
+
+    updateSttEnabled(enabled) {
+      if (!this.sttSocket) {
+        this.initSttSocket();
+      }
+      if (this.sttSocket.connected) {
+        this.sttSocket.emit("enable_dictation", { enabled: enabled });
+        console.log(`STT 识别已${enabled ? "启用" : "禁用"}`);
+      }
+    },
+
     enterFullscreen() {
       const element = document.documentElement; // 整个页面全屏
       const requestMethod =
@@ -394,75 +443,8 @@ export default {
 
     enableAudioActivities() {
       this.streamAudioPlayer.init();
-      // if (!this.audioBank) {
-      //     return;
-      // }
-      // this.audioBank.handleUserGesture();
       this.audioEnabled = true;
-
-      this.startSttPolling();
-    },
-
-    startSttPolling() {
-      if (this.sttSocket) {
-        this.sttSocket.close();
-      }
-
-      const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-      const wsUrl = `${protocol}${this.sttBackendUrl.replace(/^http:\/\//, '')}/socket.io/?EIO=4&transport=websocket`;
-      
-      this.sttSocket = new WebSocket(this.sttBackendUrl.replace('http://', 'ws://') + '/socket.io/?EIO=4&transport=websocket');
-      
-      this.sttSocket.onopen = () => {
-        console.log('STT WebSocket connected');
-        this.sttSocket.send('40{"cid":"","namespace":"/"}');
-      };
-      
-      this.sttSocket.onmessage = (event) => {
-        const data = event.data;
-        
-        if (data.startsWith('42')) {
-          const jsonStr = data.slice(2);
-          try {
-            const msg = JSON.parse(jsonStr);
-            if (msg[0] === 'stt_result') {
-              const result = msg[1];
-              console.log('STT result:', result);
-              
-              if (!this.wsClient) return;
-              
-              this.wsClient.sendData({
-                type: 'event',
-                data: { type: 'asr_result', text: result.text, is_speech: true }
-              });
-
-              if (result.is_question || result.type === 'question_detected') {
-                this.wsClient.sendData({
-                  type: 'event',
-                  data: { type: 'question_detected', question: result.text }
-                });
-              }
-            }
-          } catch (e) {
-            console.error('Parse STT message error:', e);
-          }
-        }
-      };
-      
-      this.sttSocket.onerror = (err) => {
-        console.error('STT WebSocket error:', err);
-      };
-      
-      this.sttSocket.onclose = () => {
-        console.log('STT WebSocket closed');
-      };
-    },
-
-    stopSttPolling() {
-      if (this.sttSocket) {
-        this.sttSocket.close();
-        this.sttSocket = null;
-      }
+      this.initSttSocket();
     },
 
     async recordChat(message) {
@@ -479,6 +461,7 @@ export default {
 
     showSubtitle() {
       const subtitle = this.$refs.subtitle;
+      console.log("[字幕] showSubtitle called, subtitle ref:", subtitle);
       if (!subtitle) {
         console.warn("Subtitle ref is null, cannot show subtitle");
         return;
@@ -486,6 +469,7 @@ export default {
 
       subtitle.clear();
       this.subtitleHidden = false;
+      console.log("[字幕] subtitleHidden 设置为 false");
 
       setTimeout(() => {
         if (subtitle) {
@@ -705,20 +689,25 @@ export default {
           }
 
           if (type === "say_aloud") {
+            console.log("[字幕] 收到 say_aloud, is_last:", data["is_last"], "content:", data.content ? data.content.substring(0, 50) : null, "duration:", data["duration"]);
             if (!streamAudioPlayer.isStreaming) {
               streamAudioPlayer.startStream();
             }
             const mediaData = data["media_data"];
             const duration = data["duration"] || 0;
             // 立即更新字幕，不等待事件队列处理
+            console.log("[字幕] subtitle 对象:", subtitle);
             if (subtitle) {
               if (data["is_last"] && data.content) {
                 // 如果是完整的音频，使用setSubtitle并传递时长
                 subtitle.setSubtitle(data.content, duration);
+                console.log("[字幕] 调用 setSubtitle 完成");
               } else {
                 // 流式数据仍使用addDelta
                 subtitle.addDelta(data.content);
               }
+            } else {
+              console.warn("[字幕] subtitle 为空!");
             }
             // 添加音频数据并设置媒体ID（记录 promise，避免事件队列先消费）
             data["media_id_promise"] = streamAudioPlayer
@@ -841,12 +830,23 @@ export default {
           );
         } else if (message.type === "start_of_response") {
           // start of response
+          console.log("[字幕] 收到 start_of_response，显示字幕");
           self.showSubtitle();
           in_response = true;
+          // AI 开始说话时，根据设置禁用语音识别
+          if (self.allowPauseDictation && self.enableDictation && self.sttSocket && self.sttSocket.connected) {
+            self.sttSocket.emit("enable_dictation", { enabled: false });
+            console.log("AI 说话中，暂停 STT 识别");
+          }
         } else if (message.type === "end_of_response") {
           // end of response
           in_response = false;
           console.log("end of response", message.response);
+          // AI 说完后，恢复语音识别
+          if (self.allowPauseDictation && self.enableDictation && self.sttSocket && self.sttSocket.connected) {
+            self.sttSocket.emit("enable_dictation", { enabled: true });
+            console.log("AI 说话结束，恢复 STT 识别");
+          }
           // 移除自动隐藏字幕的逻辑，保持字幕框一直显示
           // setInterval(() => {
           //     if (!in_response) {

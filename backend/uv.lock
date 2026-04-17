@@ -405,6 +405,7 @@ name = "backend"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "aiohttp" },
     { name = "av" },
     { name = "chardet" },
     { name = "cn2an" },
@@ -469,6 +470,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiohttp", specifier = ">=3.9.0" },
     { name = "av", specifier = ">=11" },
     { name = "chardet", specifier = ">=5.2.0" },
     { name = "cn2an", specifier = ">=0.5.23" },

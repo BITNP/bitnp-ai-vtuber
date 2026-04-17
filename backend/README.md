@@ -318,3 +318,49 @@ uv run run_server.py --ppt-images-dir <图片目录> --ppt-mount-path /documents
 cd backend
 uv run run_agent.py --agent-type lecture_agent --lecture-script <*_scripts.txt 或 generated_scripts 目录> --ppt-images-dir <图片目录>
 ```
+
+## 8. 交互式讲稿驱动（interactive_lecture_agent）
+
+交互式讲稿驱动模式在讲稿驱动的基础上增加了背景图片支持、文字稿循环播放、语音识别打断、上下文压缩等功能。
+
+背景图片会被当作 1 页 PPT 处理，通过 `ppt_assets` 和 `flip_ppt_page` 事件发送，与 `lecture_agent` 的 PPT 处理方式一致。
+
+**通信架构：**
+
+```
+┌─────────────────┐   WebSocket   ┌─────────────────┐   WebSocket   ┌─────────────────┐
+│  STT 后端       │ ◄──────────► │   前端 Vue      │ ◄──────────► │ Agent 后端      │
+│ (stt_backend)  │   Socket.IO   │                 │              │                 │
+│ 端口: 9236     │               │                 │              │                 │
+└─────────────────┘               └─────────────────┘              └─────────────────┘
+       │                                   │                                   │
+       │ 1. 麦克风录音                      │ 2. 转发事件                        │ 3. 处理事件
+       │ 2. Silero VAD 检测                 │    - asr_result                   │    - 暂停播放
+       │ 3. FunASR 识别                    │    - question_detected            │    - 回答问题
+       │ 4. Socket.IO 推送                  │                                   │    - 继续播放
+       └───────────────────────────────────┴───────────────────────────────────┘
+```
+
+1. 托管背景图片（与 PPT 图片目录相同）：
+
+``` shell
+cd backend
+uv run run_server.py --ppt-images-dir <图片目录> --ppt-mount-path /documents/slides
+```
+
+2. 启动交互式讲稿 Agent：
+
+``` shell
+cd backend
+uv run run_agent.py --agent-type interactive_lecture_agent --lecture-script <文字稿路径> --background-image <背景图片路径> --ppt-base-url /documents/slides
+```
+
+**参数说明：**
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--lecture-script` | 文字稿路径（txt 文件或目录） | 无 |
+| `--background-image` | 背景图片路径（会被当作第1页PPT） | 无 |
+| `--ppt-base-url` | PPT 资源基础 URL | `/documents/slides` |
+| `--system-prompt` | 角色系统提示 | 无 |
+| `--context-compress-threshold` | 上下文压缩阈值 (0.0-1.0) | 0.5 |
