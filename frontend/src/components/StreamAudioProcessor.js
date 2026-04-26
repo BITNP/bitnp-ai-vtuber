@@ -10,16 +10,26 @@ class StreamAudioProcessor extends AudioWorkletProcessor {
     this.smoothedVolume = 0;
     this.smoothingFactor = 0.5;
     this.underrunCount = 0;
+    this.maxQueueSamples = 5 * 1024 * 1024; // 5 million samples
 
     this.port.onmessage = (event) => {
       const data = event.data || {};
       if (data.type === "enqueue") {
         const buffer = data.audioBuffer;
         if (buffer) {
-          const chunk = new Float32Array(buffer);
-          if (chunk.length > 0) {
-            this.queue.push(chunk);
-            this.queueSamples += chunk.length;
+          try {
+            const chunk = new Float32Array(buffer);
+            if (chunk.length > 0) {
+              // 检查队列大小，防止内存溢出
+              if (this.queueSamples + chunk.length > this.maxQueueSamples) {
+                console.warn('Audio queue too large, dropping chunk');
+                return;
+              }
+              this.queue.push(chunk);
+              this.queueSamples += chunk.length;
+            }
+          } catch (error) {
+            console.error('Failed to process audio chunk:', error);
           }
         }
       } else if (data.type === "clear") {
@@ -77,9 +87,7 @@ class StreamAudioProcessor extends AudioWorkletProcessor {
 
     const rms = Math.sqrt(sumSquares / frameCount);
     const rawVolume = Math.max(rms, peak * 0.7) * 10;
-    this.smoothedVolume =
-      this.smoothingFactor * rawVolume +
-      (1 - this.smoothingFactor) * this.smoothedVolume;
+    this.smoothedVolume = this.smoothingFactor * rawVolume + (1 - this.smoothingFactor) * this.smoothedVolume;
 
     this.samplesSinceReport += frameCount;
     if (this.samplesSinceReport >= this.reportIntervalSamples) {

@@ -14,13 +14,12 @@ export default class StreamAudioPlayer {
     this.playedSamples = 0;
     this.queueSamples = 0;
     this.pendingChunks = [];
-    this.maxQueueSeconds = 120;
+    this.maxQueueSeconds = 60; // 最大队列时长，减少内存占用
     this.underrunCount = 0;
     this.outputSampleRate = 0;
 
     // 音量计算相关属性
     this.volume = 0; // 当前音量 (0-1)
-    // this.volumeUpdateInterval = 30; // 音量更新间隔(ms)
     this.lastVolumeUpdateTime = 0;
   }
 
@@ -91,44 +90,49 @@ export default class StreamAudioPlayer {
       throw new Error('AudioWorklet is not supported in this environment.');
     }
 
-    await this.audioContext.audioWorklet.addModule(
-      new URL('./StreamAudioProcessor.js', import.meta.url),
-    );
+    try {
+      await this.audioContext.audioWorklet.addModule(
+        new URL('./StreamAudioProcessor.js', import.meta.url),
+      );
 
-    this.workletNode = new AudioWorkletNode(
-      this.audioContext,
-      'stream-audio-processor',
-      {
-        numberOfInputs: 0,
-        numberOfOutputs: 1,
-        outputChannelCount: [1],
-      },
-    );
+      this.workletNode = new AudioWorkletNode(
+        this.audioContext,
+        'stream-audio-processor',
+        {
+          numberOfInputs: 0,
+          numberOfOutputs: 1,
+          outputChannelCount: [1],
+        },
+      );
 
-    this.workletNode.connect(this.audioContext.destination);
+      this.workletNode.connect(this.audioContext.destination);
 
-    this.workletNode.port.onmessage = (event) => {
-      const data = event.data || {};
-      if (data.type === 'stats') {
-        this.updateVolumeFromValue(data.volume || 0, Date.now());
-        if (typeof data.playedSamples === 'number') {
-          this.playedSamples = data.playedSamples;
+      this.workletNode.port.onmessage = (event) => {
+        const data = event.data || {};
+        if (data.type === 'stats') {
+          this.updateVolumeFromValue(data.volume || 0, Date.now());
+          if (typeof data.playedSamples === 'number') {
+            this.playedSamples = data.playedSamples;
+          }
+          if (typeof data.queueSamples === 'number') {
+            this.queueSamples = data.queueSamples;
+          }
+          if (typeof data.underrunCount === 'number') {
+            this.underrunCount = data.underrunCount;
+          }
         }
-        if (typeof data.queueSamples === 'number') {
-          this.queueSamples = data.queueSamples;
-        }
-        if (typeof data.underrunCount === 'number') {
-          this.underrunCount = data.underrunCount;
-        }
+      };
+
+      if (this.pendingChunks.length > 0) {
+        const pending = this.pendingChunks.slice();
+        this.pendingChunks = [];
+        pending.forEach((chunk) => {
+          this.enqueueChunk(chunk);
+        });
       }
-    };
-
-    if (this.pendingChunks.length > 0) {
-      const pending = this.pendingChunks.slice();
-      this.pendingChunks = [];
-      pending.forEach((chunk) => {
-        this.enqueueChunk(chunk);
-      });
+    } catch (error) {
+      console.error('Error setting up audio processing:', error);
+      throw error;
     }
   }
 
@@ -144,12 +148,22 @@ export default class StreamAudioPlayer {
    * 添加 base64 编码的 WAV 音频数据
    */
   async addWavData(base64WavData) {
+
+    console.log({base64WavData})
+
     if (!this.isStreaming) {
       console.warn('Stream not started. Call startStream() first.');
       return -1;
     }
 
     try {
+      // 检查 base64 数据大小，防止内存溢出
+      const maxBase64Size = 50 * 1024 * 1024; // 50MB
+      if (base64WavData.length > maxBase64Size) {
+        console.error('WAV data too large. Max size is 50MB.');
+        return -1;
+      }
+
       const mediaId = ++this.mediaIdCounter;
       
       // 解码 base64
@@ -162,6 +176,13 @@ export default class StreamAudioPlayer {
         binaryString = atob(base64WavData);
       }
       
+      // 检查二进制数据大小
+      const maxBinarySize = 40 * 1024 * 1024; // 40MB
+      if (binaryString.length > maxBinarySize) {
+        console.error('Binary data too large. Max size is 40MB.');
+        return -1;
+      }
+
       const bytes = new Uint8Array(binaryString.length);
       for (let i = 0; i < binaryString.length; i++) {
         bytes[i] = binaryString.charCodeAt(i);
@@ -229,17 +250,21 @@ export default class StreamAudioPlayer {
   async decodeWavData(wavArrayBuffer) {
     const dataView = new DataView(wavArrayBuffer);
     
-    // 检查RIFF头
-    const riff = String.fromCharCode(
-      dataView.getUint8(0),
-      dataView.getUint8(1),
-      dataView.getUint8(2),
-      dataView.getUint8(3)
-    );
+    // // 检查RIFF头
+    // if (dataView.byteLength < 12) {
+    //   throw new Error('Invalid WAV file: too short');
+    // }
     
-    if (riff !== 'RIFF') {
-      throw new Error('Not a valid WAV file');
-    }
+    // const riff = String.fromCharCode(
+    //   dataView.getUint8(0),
+    //   dataView.getUint8(1),
+    //   dataView.getUint8(2),
+    //   dataView.getUint8(3)
+    // );
+    
+    // if (riff !== 'RIFF') {
+    //   throw new Error('Not a valid WAV file');
+    // }
     
     // 解析WAV格式
     let offset = 12;
@@ -249,6 +274,10 @@ export default class StreamAudioPlayer {
     let bitsPerSample = 16;
     
     while (offset < dataView.byteLength) {
+      if (offset + 8 > dataView.byteLength) {
+        break; // 防止越界
+      }
+      
       const chunkId = String.fromCharCode(
         dataView.getUint8(offset),
         dataView.getUint8(offset + 1),
@@ -258,8 +287,21 @@ export default class StreamAudioPlayer {
       
       const chunkSize = dataView.getUint32(offset + 4, true);
       
+      // // 检查chunkSize是否合理
+      // if (chunkSize < 0 || offset + 8 + chunkSize > dataView.byteLength) {
+      //   console.warn('Invalid chunk size, skipping:', chunkId, chunkSize);
+      //   offset += 8 + chunkSize;
+      //   continue;
+      // }
+      
       if (chunkId === 'fmt ') {
         // 解析fmt区块
+        if (offset + 8 + 16 > dataView.byteLength) {
+          console.warn('Invalid fmt chunk, skipping');
+          offset += 8 + chunkSize;
+          continue;
+        }
+        
         const audioFormat = dataView.getUint16(offset + 8, true);
         numChannels = dataView.getUint16(offset + 10, true);
         sampleRate = dataView.getUint32(offset + 12, true);
@@ -267,34 +309,80 @@ export default class StreamAudioPlayer {
         
         console.log(`WAV Info: format=${audioFormat}, channels=${numChannels}, sampleRate=${sampleRate}, bits=${bitsPerSample}`);
         
+        // 验证音频参数
         if (audioFormat !== 1) {
           throw new Error('Only PCM WAV format is supported');
+        }
+        
+        if (numChannels < 1 || numChannels > 2) {
+          throw new Error(`Unsupported number of channels: ${numChannels}`);
+        }
+        
+        if (bitsPerSample !== 8 && bitsPerSample !== 16 && bitsPerSample !== 24 && bitsPerSample !== 32) {
+          throw new Error(`Unsupported bits per sample: ${bitsPerSample}`);
         }
         
       } else if (chunkId === 'data') {
         // 找到data区块
         const dataOffset = offset + 8;
-        const dataSize = chunkSize;
+        let dataSize = chunkSize;
         
-        // 解析音频数据
-        audioData = this.extractAudioData(
-          dataView, 
-          dataOffset, 
-          dataSize, 
-          numChannels, 
-          bitsPerSample
-        );
+        // 验证数据大小
+        const bytesPerSample = bitsPerSample / 8;
         
-        // 如果需要重采样
-        if (sampleRate !== this.audioContext.sampleRate) {
-          console.log(`Resampling from ${sampleRate}Hz to ${this.audioContext.sampleRate}Hz`);
-          audioData = this.resampleAudioData(audioData, sampleRate, this.audioContext.sampleRate, numChannels);
+        // 检查数据大小是否合理
+        if (dataSize <= 0 || dataSize > 50 * 1024 * 1024) { // 限制最大50MB
+          console.warn('Invalid data size, using maximum allowed size:', dataSize);
+          dataSize = Math.min(dataSize, 50 * 1024 * 1024);
         }
         
-        // 更新通道数
-        this.numChannels = numChannels;
+        // 调整数据大小，确保是字节倍数
+        if (dataSize % bytesPerSample !== 0) {
+          console.warn(`Adjusting data size: ${dataSize} bytes to ${Math.floor(dataSize / bytesPerSample) * bytesPerSample} bytes`);
+          dataSize = Math.floor(dataSize / bytesPerSample) * bytesPerSample;
+        }
         
-        break;
+        // 确保数据偏移和大小不超出范围
+        if (dataOffset + dataSize > dataView.byteLength) {
+          console.warn('Data chunk exceeds file size, adjusting');
+          dataSize = dataView.byteLength - dataOffset;
+          // 再次调整数据大小
+          if (dataSize % bytesPerSample !== 0) {
+            dataSize = Math.floor(dataSize / bytesPerSample) * bytesPerSample;
+          }
+        }
+        
+        if (dataSize <= 0) {
+          console.warn('No valid audio data found');
+          offset += 8 + chunkSize;
+          continue;
+        }
+        
+        // 解析音频数据
+        try {
+          audioData = this.extractAudioData(
+            dataView, 
+            dataOffset, 
+            dataSize, 
+            numChannels, 
+            bitsPerSample
+          );
+          
+          // 如果需要重采样
+          if (sampleRate !== this.audioContext.sampleRate) {
+            console.log(`Resampling from ${sampleRate}Hz to ${this.audioContext.sampleRate}Hz`);
+            audioData = this.resampleAudioData(audioData, sampleRate, this.audioContext.sampleRate, numChannels);
+          }
+          
+          // 更新通道数
+          this.numChannels = numChannels;
+          
+          break;
+        } catch (error) {
+          console.error('Error extracting audio data:', error);
+          offset += 8 + chunkSize;
+          continue;
+        }
       }
       
       offset += 8 + chunkSize;
@@ -313,40 +401,57 @@ export default class StreamAudioPlayer {
   extractAudioData(dataView, offset, size, numChannels, bitsPerSample) {
     const bytesPerSample = bitsPerSample / 8;
     const totalSamples = size / bytesPerSample;
-    const samplesPerChannel = totalSamples / numChannels;
     
-    const floatData = new Float32Array(totalSamples);
-    
-    if (bitsPerSample === 16) {
-      // 16-bit PCM
-      for (let i = 0; i < totalSamples; i++) {
-        const sample = dataView.getInt16(offset + i * 2, true);
-        floatData[i] = sample / 32768.0;
-      }
-    } else if (bitsPerSample === 8) {
-      // 8-bit PCM
-      for (let i = 0; i < totalSamples; i++) {
-        const sample = dataView.getUint8(offset + i);
-        floatData[i] = (sample - 128) / 128.0;
-      }
-    } else if (bitsPerSample === 24) {
-      // 24-bit PCM
-      for (let i = 0; i < totalSamples; i++) {
-        const sample = dataView.getInt8(offset + i * 3) << 16 |
-                      dataView.getUint8(offset + i * 3 + 1) << 8 |
-                      dataView.getUint8(offset + i * 3 + 2);
-        floatData[i] = sample / 8388608.0;
-      }
-    } else if (bitsPerSample === 32) {
-      // 32-bit float
-      for (let i = 0; i < totalSamples; i++) {
-        floatData[i] = dataView.getFloat32(offset + i * 4, true);
-      }
-    } else {
-      throw new Error(`Unsupported bits per sample: ${bitsPerSample}`);
+    // 检查样本数量，防止内存溢出
+    const maxSamples = 10 * 1024 * 1024; // 10 million samples
+    if (totalSamples > maxSamples) {
+      throw new Error(`Too many samples: ${totalSamples}. Max is ${maxSamples}.`);
     }
     
-    return floatData;
+    // 确保样本数量是整数
+    if (!Number.isInteger(totalSamples)) {
+      throw new Error(`Invalid number of samples: ${totalSamples}`);
+    }
+    
+    try {
+      const floatData = new Float32Array(totalSamples);
+      
+      if (bitsPerSample === 16) {
+        // 16-bit PCM
+        for (let i = 0; i < totalSamples; i++) {
+          const sample = dataView.getInt16(offset + i * 2, true);
+          floatData[i] = sample / 32768.0;
+        }
+      } else if (bitsPerSample === 8) {
+        // 8-bit PCM
+        for (let i = 0; i < totalSamples; i++) {
+          const sample = dataView.getUint8(offset + i);
+          floatData[i] = (sample - 128) / 128.0;
+        }
+      } else if (bitsPerSample === 24) {
+        // 24-bit PCM
+        for (let i = 0; i < totalSamples; i++) {
+          const sample = dataView.getInt8(offset + i * 3) << 16 |
+                        dataView.getUint8(offset + i * 3 + 1) << 8 |
+                        dataView.getUint8(offset + i * 3 + 2);
+          floatData[i] = sample / 8388608.0;
+        }
+      } else if (bitsPerSample === 32) {
+        // 32-bit float
+        for (let i = 0; i < totalSamples; i++) {
+          floatData[i] = dataView.getFloat32(offset + i * 4, true);
+        }
+      } else {
+        throw new Error(`Unsupported bits per sample: ${bitsPerSample}`);
+      }
+      
+      return floatData;
+    } catch (error) {
+      if (error instanceof RangeError && error.message.includes('Array buffer allocation failed')) {
+        throw new Error('Memory allocation failed. Audio data too large.');
+      }
+      throw error;
+    }
   }
 
   /**
@@ -360,6 +465,13 @@ export default class StreamAudioPlayer {
     const ratio = targetSampleRate / originalSampleRate;
     const originalLength = audioData.length;
     const targetLength = Math.round(originalLength * ratio);
+    
+    // 检查目标长度，防止内存溢出
+    const maxSamples = 10 * 1024 * 1024; // 10 million samples
+    if (targetLength > maxSamples) {
+      throw new Error(`Resampled audio too large: ${targetLength} samples. Max is ${maxSamples}.`);
+    }
+    
     const resampledData = new Float32Array(targetLength);
     
     // 简单线性插值重采样

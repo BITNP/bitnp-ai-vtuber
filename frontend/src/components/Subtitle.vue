@@ -14,6 +14,10 @@ export default {
             type: Boolean,
             default: true,
         },
+        dynamic: {
+            type: Boolean,
+            default: true,
+        }
     },
     data() {
         return {
@@ -29,9 +33,14 @@ export default {
     methods: {
         setSubtitle(subtitle, duration = 0) {
             this.target = String(subtitle);
-            this.display = '';
             this.duration = duration;
             this.startTime = Date.now();
+            
+            if (!this.dynamic) {
+                this.display = this.target;
+            } else {
+                this.display = '';
+            }
         },
 
         addDelta(delta) {
@@ -39,6 +48,7 @@ export default {
              * Add a delta to the target subtitle.
              * @param {string} delta - The delta to add.
              */
+            if (!this.dynamic) return;
             this.target += String(delta);
         },
 
@@ -47,6 +57,8 @@ export default {
         },
 
         updateDisplay() {
+            if (!this.dynamic) return;
+            
             if (!this.enable || this.display === this.target) {
                 return;
             }

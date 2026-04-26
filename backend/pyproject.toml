@@ -62,5 +62,6 @@ dependencies = [
     "dataclasses>=0.8",
     "pathlib>=1.0.1",
     "pdf2image>=1.17.0",
-    "onnxruntime-gpu>=1.24.3",
+    "onnxruntime>=1.24.3",
+    "lxml>=6.1.0",
 ]

@@ -4,7 +4,8 @@
 </template>
 
 <script>
-import Demo from './Demo/BasicChattingApp.vue'
+// import Demo from './Demo/BasicChattingApp.vue'
+import Demo from './Demo/OnlineTeacher.vue'
 // import Demo from './Demo/Teacher.vue'
 
 export default {
