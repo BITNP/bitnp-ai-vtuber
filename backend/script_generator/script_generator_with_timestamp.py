@@ -18,23 +18,24 @@ voice = "cosyvoice-v3.5-flash-myvoice-237e5f49cf7240df9f3ebb6dcb4ef7a2"
 tts = CosyVoiceTTS(api_key=api_key, voice=voice)
 
 
-async def generate_audio(text: str):
-    audio = await tts.synthesize(text)
-    return audio
+async def generate_audio_with_timestamp(text: str):
+    audio, timestamp_data = await tts.synthesize(text, word_timestamp_enabled=True)
 
-def split_sentences(text: str, min_sentence_length: int = 5, seps = "。？！，；\n"):
+    return audio, timestamp_data
+
+def split_sentences(text: str):
     sentences = []
     current_sentence = ""
     for char in text:
         current_sentence += char
-        if char in seps and len(current_sentence.strip()) >= min_sentence_length:
+        if char in ["。", "？", "！"]:
             sentences.append(current_sentence)
             current_sentence = ""
     if current_sentence:
         sentences.append(current_sentence)
     return sentences
 
-def generate_command_json(elements_info, output_dir):
+def generate_command_json(elements_info, audio_timestamp_map, output_dir):
     """生成command.json文件"""
     commands = []
     current_audio_counter = 1
@@ -54,6 +55,8 @@ def generate_command_json(elements_info, output_dir):
                         "audio": audio_path,
                         "text": sentence
                     }
+                    if current_audio_counter in audio_timestamp_map:
+                        command["timestamps"] = audio_timestamp_map[current_audio_counter]
                     commands.append(command)
                     current_audio_counter += 1
         
@@ -66,6 +69,10 @@ def generate_command_json(elements_info, output_dir):
                         "audio": audio_path,
                         "text": sentence
                     }
+                    if current_audio_counter in audio_timestamp_map:
+                        command["timestamps"] = audio_timestamp_map[current_audio_counter]
+                    commands.append(command)
+                    current_audio_counter += 1
 
             commands.append({
                 "type": "interaction_start",
@@ -147,26 +154,33 @@ async def main(path_to_script: PathLike, output_dir: PathLike):
     
     # 生成音频和时间戳
     print(f"开始生成音频，共 {len(remaining_tasks)} 个音频任务")
+    audio_timestamp_map = {}
     
     # 先加载已生成的时间戳
     if completed_audio > 0:
         for i in range(1, completed_audio + 1):
             audio_path = os.path.join(output_dir, "audio", f"{i}.wav")
+            if os.path.exists(audio_path):
+                # 这里简化处理，实际应该保存时间戳到文件
+                # 暂时假设已生成的音频都有时间戳
+                pass
     
     for audio_counter, text in tqdm(remaining_tasks, desc="生成音频", unit="句"):
-        audio = await generate_audio(text)
+        audio, timestamp_data = await generate_audio_with_timestamp(text)
 
         audio_path = os.path.join(output_dir, "audio", f"{audio_counter}.wav")
         with open(audio_path, "wb") as f:
             f.write(audio)
+        audio_timestamp_map[audio_counter] = timestamp_data
         
         # 更新进度文件
         progress = {"completed_audio": audio_counter}
         with open(progress_file, "w", encoding="utf-8") as f:
             json.dump(progress, f, ensure_ascii=False, indent=2)
-
-    generate_command_json(elements_info, output_dir)
-    print(f"command.json 已写入")
+        
+        # 每生成一段音频后更新command.json
+        generate_command_json(elements_info, audio_timestamp_map, output_dir)
+        print(f"command.json 已更新，当前完成 {audio_counter} 个音频")
     
     print(f"音频生成完成，共 {len(audio_tasks)} 个音频任务")
     

@@ -120,7 +120,7 @@
     >
       <div><!-- placeholder --></div>
       <div ref="subtitleInnerContainer" class="subtitle-inner-container">
-        <Subtitle ref="subtitle" class="subtitle-text" :dynamic="isInteraction" />
+        <Subtitle ref="subtitle" class="subtitle-text" :dynamic="true" />
       </div>
     </div>
 
@@ -181,6 +181,7 @@ export default {
       microphoneOn: false,
       debug: false,
       audioEnabled: false, // The user needs to interact with the page (by clicking the button) to enable audio
+      currentSubtitle: "", // 当前显示的字幕文本
 
       imageSrc: "",
       inputText: "",
@@ -264,6 +265,8 @@ export default {
 
     async sendUserInput() {
       if (this.inputText.trim() === "") return;
+
+      this.currentSubtitle = "";
       
       this.wsClient.sendData({
         type: "event",
@@ -280,7 +283,7 @@ export default {
         return;
       }
 
-      subtitle.clear();
+      // subtitle.clear();
       this.subtitleHidden = false;
 
       setTimeout(() => {
@@ -303,6 +306,7 @@ export default {
         type: "event",
         data: { type: "ppt_playback_finished" },
       });
+      this.currentSubtitle = "";
     },
 
     sendLectureControl(action, payload = {}) {
@@ -404,7 +408,7 @@ export default {
       }
       
       // 清空字幕
-      subtitle.clear();
+      // subtitle.clear();
       this.subtitleHidden = false;
       
       // 取消之前可能正在运行的字幕更新
@@ -418,8 +422,8 @@ export default {
       
       // 为每个单词设置定时器
       console.log("DEBUG set promise", text, sortedTimestamps);
+      const self = this;
       this.subtitleUpdatePromise = (async () => {
-        let currentText = "";
         let lastTime = 0;
         let lastIndex = -1;
         
@@ -443,9 +447,9 @@ export default {
             break;
           }
           
-          currentText += timestamp.text;
-          console.log("DEBUG subtitle setSubtitle:", currentText);
-          subtitle.setSubtitle(currentText);
+          self.currentSubtitle += timestamp.text;
+          console.log("DEBUG subtitle setSubtitle:", self.currentSubtitle);
+          subtitle.setSubtitle(self.currentSubtitle);
         }
       })();
       
@@ -514,10 +518,10 @@ export default {
 
           // 处理字幕事件
           if (type === "subtitle") {
-            const subtitle = this.$refs.subtitle;
-            if (subtitle) {
-              subtitle.setSubtitle(data.content);
-            }
+            // const subtitle = this.$refs.subtitle;
+            // if (subtitle) {
+            //   subtitle.setSubtitle(data.content);
+            // }
           }
 
           // 处理语音事件
@@ -591,7 +595,8 @@ export default {
                     // 没有时间戳，直接显示完整字幕
                     const subtitle = this.$refs.subtitle;
                     if (subtitle && data.content) {
-                      subtitle.setSubtitle(data.content);
+                      this.currentSubtitle += data.content;
+                      subtitle.setSubtitle(this.currentSubtitle);
                     }
                   }
                   

@@ -30,14 +30,16 @@ class OnlineTeacherAgent(Agent):
         self.tts_stream = tts_stream
         self.command_json_path = command_json_path
         self.commands = []
+        self.interaction_commands = []
         self.current_command_index = 0
         self.is_playing = False
         self.is_interaction = False
         self.interaction_prompt = ""
         self.interaction_duration = 0
+        self.first_sentence_emitted = False
 
         # streaming workflow: sentence_sep -> brackets_parsor -> event_emitter
-        self.sentence_sep_node = SentenceSepNode(seps = ".,:;?!。，：；？！\n")
+        self.sentence_sep_node = SentenceSepNode(seps = ".,:;?!。，：；？！\n ")
         self.brackets_parsor_node = BracketsParsorNode()
 
         async def event_emitter_lambda(_, data):
@@ -59,6 +61,7 @@ class OnlineTeacherAgent(Agent):
             """
             Handle user input event
             """
+            self.first_sentence_emitted = False
             if self.is_interaction:
                 content = event_data.get("content", "")
                 if not is_empty(content):
@@ -88,6 +91,9 @@ class OnlineTeacherAgent(Agent):
             """
             if not self.is_interaction:
                 await self.process_next_command()
+            else:
+                await self.process_next_command_in_interaction()
+
 
         @self.on("interaction_finished")
         async def handle_interaction_finished(_, timestamp: str, event_data: EventData):
@@ -114,6 +120,9 @@ class OnlineTeacherAgent(Agent):
         Start playback of commands
         """
         self.is_playing = True
+        if self.is_interaction:
+            self.is_interaction = False
+
         await self.process_next_command()
 
     async def process_next_command(self):
@@ -132,6 +141,18 @@ class OnlineTeacherAgent(Agent):
             await self.handle_say_command(command)
         elif command["type"] == "interaction_start":
             await self.handle_interaction_command(command)
+
+    async def process_next_command_in_interaction(self):
+            """
+            Process next command in interaction
+            """
+            print("DEBUG process_next_command_in_interaction")
+            if self.is_interaction and self.interaction_commands:
+                # 取出第一个命令并发送
+                event_data = self.interaction_commands.pop(0)
+                print("DEBUG send audio:", event_data["content"])
+                await self.emit(event_data)
+                print("DEBUG audio sent:", event_data["content"])
 
     async def handle_ppt_command(self, command):
         """
@@ -201,8 +222,10 @@ class OnlineTeacherAgent(Agent):
         Handle interaction command
         """
         self.is_interaction = True
+        self.interaction_commands = []
         self.interaction_duration = command["duration"]
         self.interaction_prompt = command["prompt"]
+        self.first_sentence_emitted = False
 
         # 发送互动开始信号
         await self.emit({"type": "interaction_start", "duration": self.interaction_duration, "prompt": self.interaction_prompt})
@@ -210,7 +233,7 @@ class OnlineTeacherAgent(Agent):
         # 初始化LLM上下文
         self.llm_api_config.system_prompt = self.interaction_prompt
         self.llm = create_bot(**self.llm_api_config)
-        self.llm.messages = []
+        # self.llm.messages = []
         # # 添加系统提示
         # self.llm.append_context(self.interaction_prompt, "system")
 
@@ -222,16 +245,16 @@ class OnlineTeacherAgent(Agent):
         async def handle_message_delta(data):
             content_chunk = data["content"]
             
-            # 1. 首先检查PPT/PDF翻页指令 - 最高优先级，不等待任何操作
-            import re
-            pattern = r'\[(?:PPT_([0-9]+)|PDF_([0-9]+)|翻页:?\s*([0-9]+))\]'
-            matches = list(re.finditer(pattern, content_chunk))
+            # # 1. 首先检查PPT/PDF翻页指令 - 最高优先级，不等待任何操作
+            # import re
+            # pattern = r'\[(?:PPT_([0-9]+)|PDF_([0-9]+)|翻页:?\s*([0-9]+))\]'
+            # matches = list(re.finditer(pattern, content_chunk))
             
-            for match in matches:
-                page_num = int(match.group(1) if match.group(1) else (match.group(2) if match.group(2) else match.group(3)))
-                if 1 <= page_num <= 100:
-                    # 立即发送翻页事件，不等待任何其他操作
-                    await self.emit({"type": "flip_ppt_page", "page_num": page_num})
+            # for match in matches:
+            #     page_num = int(match.group(1) if match.group(1) else (match.group(2) if match.group(2) else match.group(3)))
+            #     if 1 <= page_num <= 100:
+            #         # 立即发送翻页事件，不等待任何其他操作
+            #         await self.emit({"type": "flip_ppt_page", "page_num": page_num})
             
             # 2. 然后处理文本和TTS合成 - 低优先级，可延迟
             await self.sentence_sep_node.handle(content_chunk)
@@ -243,20 +266,20 @@ class OnlineTeacherAgent(Agent):
             await self.emit({"type": "end_of_response", "response": data["content"]})
             
             # 检查AI回复中是否包含PPT翻页指令
-            response_content = data["content"]
-            import re
+            # response_content = data["content"]
+            # import re
             
-            # 匹配多种格式：
-            # 1. [PPT_2] (来自PPT的格式)
-            # 2. [PDF_2] (来自PDF的格式)
-            # 3. [翻页:1] 或 [翻页: 1] (旧格式)
-            pattern = r'\[(?:PPT_([0-9]+)|PDF_([0-9]+)|翻页:?\s*([0-9]+))\]'
-            match = re.search(pattern, response_content)
+            # # 匹配多种格式：
+            # # 1. [PPT_2] (来自PPT的格式)
+            # # 2. [PDF_2] (来自PDF的格式)
+            # # 3. [翻页:1] 或 [翻页: 1] (旧格式)
+            # pattern = r'\[(?:PPT_([0-9]+)|PDF_([0-9]+)|翻页:?\s*([0-9]+))\]'
+            # match = re.search(pattern, response_content)
             
-            if match:
-                # 获取匹配到的页码（从三个捕获组中取非None的那个）
-                page_num = int(match.group(1) if match.group(1) else (match.group(2) if match.group(2) else match.group(3)))
-                await self.emit({"type": "flip_ppt_page", "page_num": page_num})
+            # if match:
+            #     # 获取匹配到的页码（从三个捕获组中取非None的那个）
+            #     page_num = int(match.group(1) if match.group(1) else (match.group(2) if match.group(2) else match.group(3)))
+            #     await self.emit({"type": "flip_ppt_page", "page_num": page_num})
 
     async def handle_event(self, data: dict):
         """
@@ -285,15 +308,41 @@ class OnlineTeacherAgent(Agent):
                         else:
                             display_text = ""
 
-                        # 仿照say命令的方式发送事件
-                        await self.emit({"type": "say_aloud", "content": display_text, "media_data": base64_data, "format": "wav", "is_last": True, "seq": 0})
+                        # 构建事件数据
+                        event_data = {"type": "say_aloud", "content": display_text, "media_data": base64_data, "format": "wav", "is_last": True, "seq": 0}
+                        
+                        # 检查是否在交互期间
+                        if self.is_interaction:
+                            # 首句直接发送
+                            if not self.first_sentence_emitted:
+                                await self.emit(event_data)
+                                self.first_sentence_emitted = True
+                            else:
+                                # 后续句子存储到 interaction_commands
+                                self.interaction_commands.append(event_data)
+                        else:
+                            # 非交互期间直接发送
+                            await self.emit(event_data)
                 else:
                     media_data = await self.tts.synthesize(content)
                     if self.tts.format == "pcm":
                         media_data = pcm2wav(media_data, sample_rate=self.tts.sample_rate, channels=self.tts.channels, bits_per_sample=self.tts.bits_per_sample)
                     base64_data = base64.b64encode(media_data).decode("utf-8")
-                    # 仿照say命令的方式发送事件
-                    await self.emit({"type": "say_aloud", "content": content, "media_data": base64_data, "format": "wav", "is_last": True, "seq": 0})
+                    # 构建事件数据
+                    event_data = {"type": "say_aloud", "content": content, "media_data": base64_data, "format": "wav", "is_last": True, "seq": 0}
+                    
+                    # 检查是否在交互期间
+                    if self.is_interaction:
+                        # 首句直接发送
+                        if not self.first_sentence_emitted:
+                            await self.emit(event_data)
+                            self.first_sentence_emitted = True
+                        else:
+                            # 后续句子存储到 interaction_commands
+                            self.interaction_commands.append(event_data)
+                    else:
+                        # 非交互期间直接发送
+                        await self.emit(event_data)
             except Exception as e:
                 print(f"TTS合成出错: {e}")
                 raise e

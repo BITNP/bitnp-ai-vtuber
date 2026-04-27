@@ -88,25 +88,43 @@ class CosyVoiceTTS(AbstractTTS):
     async def synthesize(self, text: str, word_timestamp_enabled: bool = False) -> Tuple[bytes, List]:
         dashscope.api_key = self.api_key
 
-        callback = Callback()
-        synthesizer = SpeechSynthesizer(
-            model=self.model,
-            voice=self.voice,
-            callback=callback,
-            format=AudioFormat.WAV_24000HZ_MONO_16BIT,
-            additional_params={'word_timestamp_enabled': True} if word_timestamp_enabled else None
-        )
+        if word_timestamp_enabled:
+            if is_nonsense(text):
+                return b'', []
 
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, synthesizer.call, text)
+            callback = Callback()
+            synthesizer = SpeechSynthesizer(
+                model=self.model,
+                voice=self.voice,
+                callback=callback,
+                format=AudioFormat.WAV_24000HZ_MONO_16BIT,
+                additional_params={'word_timestamp_enabled': True} if word_timestamp_enabled else None
+            )
 
-        await callback.wait_for_complete()
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, synthesizer.call, text)
 
-        audio = b''.join(callback.audio_chunks)
-        timestamp_data = list(callback.word_timestamps.values())
+            await callback.wait_for_complete()
 
-        if not word_timestamp_enabled:
+            audio = b''.join(callback.audio_chunks)
+            timestamp_data = list(callback.word_timestamps.values())
+
+            
+
+            return audio, timestamp_data
+
+        else:
+            # without word timestamp
+            print("DEBUG synthesize without word timestamp:", text)
+
+            if is_nonsense(text):
+                return b''
+
+            synthesizer = SpeechSynthesizer(
+                model=self.model,
+                voice=self.voice,
+                format=AudioFormat.WAV_24000HZ_MONO_16BIT
+            )
+            audio = synthesizer.call(text)
+
             return audio
-
-        return audio, timestamp_data
-

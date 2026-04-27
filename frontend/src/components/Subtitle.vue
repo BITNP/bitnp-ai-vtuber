@@ -38,8 +38,6 @@ export default {
             
             if (!this.dynamic) {
                 this.display = this.target;
-            } else {
-                this.display = '';
             }
         },
 
