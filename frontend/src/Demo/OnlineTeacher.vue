@@ -1,19 +1,39 @@
 <template>
+
+  <!-- 启用音频按钮 -->
+  <div v-if="!audioEnabled" class="audio-button-container" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 99999;">
+    <button @click="enableAudioActivities" style="font-size: 2rem; padding: 20px 40px; background-color: rgba(255,255,255,0.8); border: none; border-radius: 10px; cursor: pointer; font-weight: bold;">
+      启用音频
+    </button>
+  </div>
+
   <div>
     <div
       :class="['mask', masked ? '' : 'display-none']"
-      @click="handleMaskClick"
     >
-      <div class="logos">
-        <img src="@/../public/images/bitnp-logo.png" alt="BitnP Logo" />
-        <img
-          src="@/../public/images/shumeiniang-ciallo.png"
-          alt="Ciallo～(∠・ω< )⌒★"
-        />
+      <video
+        src="@/../public/images/pre-background.mp4"
+        width="1280"
+        height="720"
+        style="width: 100vw; height: 100vh; object-fit: cover;"
+        autoplay
+        loop
+        muted
+      >
+      </video>
+      
+      <!-- 倒计时显示 -->
+      <div class="countdown" style="position: absolute; top: 50px; left: 100px; font-size: 3rem; font-weight: bold; color: white; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); text-align: left;">
+        <span style="font-size: 4rem;">{{ liveTitle }}</span>
+        <br>
+        距离直播开始还有 {{ countdownMinutes.toString().padStart(2, '0') }}:{{ countdownSeconds.toString().padStart(2, '0') }}
       </div>
-      <div style="font-size: 2rem; font-weight: bold; color: #f2a7b5">
-        CLICK TO START
+      
+      <!-- 直播主题 -->
+      <div class="live-title" style="position: absolute; bottom: 40px; right: 40px; font-size: 3rem; font-weight: bold; color: white; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); text-align: right;">
+        {{ organizer }}
       </div>
+      
       <svg class="animation-mask">
         <mask id="ripple-mask">
           <rect width="100%" height="100%" fill="white" />
@@ -53,12 +73,11 @@
       </div>
     </div>
 
-    <div class="user-interface" id="user-interface">
-      <!-- UI区域 -->
+    <!-- <div class="user-interface" id="user-interface">
       <button v-if="!audioEnabled" @click="enableAudioActivities">
         启用音频
       </button>
-    </div>
+    </div> -->
 
     <div class="logo-background"></div>
 
@@ -177,7 +196,7 @@ export default {
   },
   data() {
     return {
-      masked: true, // 是否显示遮罩层, 初始为true，点击后变为false
+      masked: true, // 是否显示遮罩层, 初始为true，倒计时结束后变为false
       microphoneOn: false,
       debug: false,
       audioEnabled: false, // The user needs to interact with the page (by clicking the button) to enable audio
@@ -186,6 +205,18 @@ export default {
       imageSrc: "",
       inputText: "",
       subtitleHidden: false, // 是否隐藏字幕
+
+      // 倒计时相关
+      countdownTarget: null, // 倒计时目标时间
+      countdownMinutes: 0, // 剩余分钟
+      countdownSeconds: 0, // 剩余秒数
+      countdownTimer: null, // 倒计时定时器
+
+      // 直播主题
+      liveTitle: "“智绘反诈”AIGC大赛线上培训会",
+
+      // 组织者
+      organizer: "网络开拓者协会技术部",
 
       // PPT相关配置
       currentSlideUrl: "", // 当前显示的幻灯片URL
@@ -204,6 +235,7 @@ export default {
       interactionTitle: "互动时间",
       interactionDuration: 0,
       interactionTimeLeft: 0,
+      interactionTarget: null,
       interactionTimer: null,
 
       // 字幕更新相关
@@ -251,16 +283,75 @@ export default {
 
     enableAudioActivities() {
       // 初始化音频播放器，确保符合浏览器的自动播放政策
-      this.streamAudioPlayer.init().then((success) => {
-        if (success) {
-          this.audioEnabled = true;
-          console.log('音频已启用');
-        } else {
-          console.error('音频初始化失败');
-        }
-      }).catch((error) => {
-        console.error('音频启用失败:', error);
+      console.log('尝试启用音频');
+      return new Promise((resolve, reject) => {
+        this.streamAudioPlayer.init().then((success) => {
+          if (success) {
+            this.audioEnabled = true;
+            console.log('音频已启用');
+            resolve(true);
+          } else {
+            console.error('音频初始化失败');
+            resolve(false);
+          }
+        }).catch((error) => {
+          console.error('音频启用失败:', error);
+          reject(error);
+        });
       });
+    },
+
+    // 初始化倒计时
+    initCountdown() {
+      // DEBUG: 设置目标时间为当前时间后2分钟
+      this.countdownTarget = new Date();
+      this.countdownTarget.setSeconds(this.countdownTarget.getSeconds() + 120);
+      
+      // 开始倒计时
+      this.updateCountdown();
+      this.countdownTimer = setInterval(() => {
+        this.updateCountdown();
+      }, 500);
+    },
+
+    // 更新倒计时
+    updateCountdown() {
+      const now = new Date();
+      const diff = Math.max(0, this.countdownTarget - now);
+      
+      this.countdownMinutes = Math.floor(diff / 60000);
+      this.countdownSeconds = Math.floor((diff % 60000) / 1000);
+      
+      // 倒计时结束
+      if (diff === 0) {
+        this.endCountdown();
+      }
+    },
+
+    // 结束倒计时并开始直播
+    async endCountdown() {
+      clearInterval(this.countdownTimer);
+      this.countdownTimer = null;
+      
+      // // 尝试启用音频
+      // if (!this.audioEnabled) {
+      //   try {
+      //     await this.enableAudioActivities();
+      //   } catch (error) {
+      //     console.error('音频初始化失败，将继续无音频播放:', error);
+      //   }
+      // }
+      
+      // 隐藏遮罩层
+      this.masked = false;
+      
+      // 发送开始播放信号给后端
+      if (this.wsClient) {
+        this.wsClient.sendData({
+          type: "event",
+          data: { type: "start_playback" },
+        });
+      }
     },
 
     async sendUserInput() {
@@ -336,52 +427,36 @@ export default {
       }
     },
 
-    handleMaskClick(e) {
-      this.enableAudioActivities();
-      const circle = this.$refs.circleRef;
-      if (!circle) {
-        console.error("Mask circle ref is null");
-        return;
-      }
 
-      // 添加扩展动画类
-      console.log(circle);
-      console.log(e);
-      circle.setAttribute("cx", e.clientX);
-      circle.setAttribute("cy", e.clientY);
-      circle.classList.add("ripple-circle");
-
-      // 动画结束后隐藏遮罩层
-      circle.addEventListener(
-        "animationend",
-        () => {
-          this.masked = false;
-          // 发送开始播放信号给后端
-          this.wsClient.sendData({
-            type: "event",
-            data: { type: "start_playback" },
-          });
-        },
-        { once: true },
-      );
-    },
 
     // 开始互动倒计时
     startInteractionTimer(duration) {
       this.interactionDuration = duration;
-      this.interactionTimeLeft = duration;
+      this.interactionTarget = new Date();
+      this.interactionTarget.setSeconds(this.interactionTarget.getSeconds() + duration);
       
       if (this.interactionTimer) {
         clearInterval(this.interactionTimer);
       }
       
+      this.updateInteractionCountdown();
       this.interactionTimer = setInterval(() => {
-        this.interactionTimeLeft--;
-        if (this.interactionTimeLeft <= 0) {
-          clearInterval(this.interactionTimer);
-          this.endInteraction();
-        }
-      }, 1000);
+        this.updateInteractionCountdown();
+      }, 500);
+    },
+
+    // 更新互动倒计时
+    updateInteractionCountdown() {
+      const now = new Date();
+      const diff = Math.max(0, this.interactionTarget - now);
+      
+      this.interactionTimeLeft = Math.ceil(diff / 1000);
+      
+      // 倒计时结束
+      if (diff === 0) {
+        clearInterval(this.interactionTimer);
+        this.endInteraction();
+      }
     },
 
     // 结束互动
@@ -466,6 +541,9 @@ export default {
 
   mounted() {
     const self = this;
+
+    // 初始化倒计时
+    this.initCountdown();
 
     // shumeiniang Live2d controller
     const config = LIVE2D_CONFIG;
@@ -818,6 +896,11 @@ export default {
       clearInterval(this.interactionTimer);
     }
 
+    // 清理倒计时计时器
+    if (this.countdownTimer) {
+      clearInterval(this.countdownTimer);
+    }
+
     // 清理 PPT 图片URL，释放内存
     this.currentSlideUrl = null;
 
@@ -929,7 +1012,6 @@ export default {
   color: white;
   border: none;
   border-radius: 5px;
-  cursor: pointer;
   font-size: 1em;
 }
 
@@ -1197,7 +1279,7 @@ export default {
   left: 0;
   width: 100%;
   height: 100%;
-  z-index: 1145141919810;
+  z-index: 999;
 
   justify-content: center;
   align-items: center;
@@ -1205,7 +1287,6 @@ export default {
   gap: 3rem;
   display: flex;
 
-  cursor: pointer;
   mask-image: url(#ripple-mask);
   mask-mode: luminance;
 }
