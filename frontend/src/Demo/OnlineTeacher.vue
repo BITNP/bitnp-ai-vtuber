@@ -49,7 +49,7 @@
     <div class="background-image"></div>
 
     <!-- PPT展示区域 -->
-    <div class="ppt-container">
+    <div :class="['ppt-container', pptContainerAnimationState]">
       <img
         v-if="currentSlideUrl"
         :src="currentSlideUrl"
@@ -65,17 +65,18 @@
         <h2>{{ interactionTitle }}</h2>
         <div class="interaction-timer">{{ interactionTimeLeft }}秒</div>
       </div>
-      <div class="interaction-input">
-        <input
-          ref="inputArea"
-          type="text"
-          v-model="inputText"
-          placeholder="请输入你的问题..."
-          @keyup.enter="sendUserInput"
-        />
-        <button @click="sendUserInput">发送</button>
-      </div>
     </div>
+
+    <!-- 当前回答的弹幕展示区域 -->
+    <Transition name="danmaku" mode="out-in">
+      <div v-if="isInteraction && currentDanmaku" :key="currentDanmaku.timestamp + '-' + currentDanmaku.uid" class="current-danmaku-container">
+        <div class="current-danmaku-header">当前回答</div>
+        <div class="current-danmaku-content">
+          <span class="danmaku-username">{{ currentDanmaku.uname }}:</span>
+          <span class="danmaku-message">{{ currentDanmaku.msg }}</span>
+        </div>
+      </div>
+    </Transition>
 
     <!-- <div class="user-interface" id="user-interface">
       <button v-if="!audioEnabled" @click="enableAudioActivities">
@@ -147,7 +148,7 @@
       </div>
     </div>
 
-    <div class="canvas-container">
+    <div :class="['canvas-container', avatarPosition]">
       <canvas ref="mainCanvas" id="mainCanvas" class="main_canvas"></canvas>
     </div>
 
@@ -200,6 +201,8 @@ export default {
   },
   data() {
     return {
+      avatarPosition: 'center out',
+      pptContainerAnimationState: '',
       masked: true, // 是否显示遮罩层, 初始为true，倒计时结束后变为false
       microphoneOn: false,
       debug: false,
@@ -241,6 +244,14 @@ export default {
       interactionTimeLeft: 0,
       interactionTarget: null,
       interactionTimer: null,
+
+      // 弹幕相关配置
+      danmakuHistory: [], // 存储弹幕历史
+      lastDanmakuFetchTime: null, // 上次获取弹幕的时间
+      currentDanmaku: null, // 当前正在回答的弹幕
+      danmakuFetchTimer: null, // 弹幕获取定时器
+      isBackendBusy: false, // 后端是否正在处理
+      pendingDanmakus: [], // 待处理的弹幕队列
 
       // 字幕更新相关
       subtitleUpdatePromise: null, // 保存字幕更新的Promise
@@ -309,7 +320,7 @@ export default {
     initCountdown() {
       // DEBUG: 设置目标时间为当前时间后2分钟
       this.countdownTarget = new Date();
-      this.countdownTarget.setSeconds(this.countdownTarget.getSeconds() + 120);
+      this.countdownTarget.setSeconds(this.countdownTarget.getSeconds() + 10);
       
       // 开始倒计时
       this.updateCountdown();
@@ -327,7 +338,7 @@ export default {
       this.countdownSeconds = Math.floor((diff % 60000) / 1000);
       
       // 倒计时结束
-      if (diff === 0) {
+      if (diff <= 0) {
         this.endCountdown();
       }
     },
@@ -336,26 +347,45 @@ export default {
     async endCountdown() {
       clearInterval(this.countdownTimer);
       this.countdownTimer = null;
-      
-      // // 尝试启用音频
-      // if (!this.audioEnabled) {
-      //   try {
-      //     await this.enableAudioActivities();
-      //   } catch (error) {
-      //     console.error('音频初始化失败，将继续无音频播放:', error);
-      //   }
-      // }
-      
-      // 隐藏遮罩层
-      this.masked = false;
-      
-      // 发送开始播放信号给后端
-      if (this.wsClient) {
-        this.wsClient.sendData({
-          type: "event",
-          data: { type: "start_playback" },
-        });
+
+      const circle = this.$refs.circleRef;
+      if (!circle) {
+        console.error("Mask circle ref is null");
+        return;
       }
+
+      // 添加扩展动画类
+      console.log(circle);
+      circle.setAttribute("cx", window.innerWidth / 2);
+      circle.setAttribute("cy", window.innerHeight / 2);
+      circle.classList.add("ripple-circle");
+
+      // 动画结束后隐藏遮罩层
+      circle.addEventListener(
+        "animationend",
+        () => {
+          this.masked = false;
+          this.avatarPosition = "center";
+          setTimeout(() => {
+            this.avatarPosition = "corner";
+          }, 10000); // 10秒后切换回右下角位置
+          // 发送开始播放信号给后端
+          this.wsClient.sendData({
+            type: "event",
+            data: { type: "start_playback" },
+          });
+          this.lastDanmakuFetchTime = new Date().toISOString();
+        },
+        { once: true },
+      );
+      
+      // // 发送开始播放信号给后端
+      // if (this.wsClient) {
+      //   this.wsClient.sendData({
+      //     type: "event",
+      //     data: { type: "start_playback" },
+      //   });
+      // }
     },
 
     async sendUserInput() {
@@ -466,10 +496,14 @@ export default {
     // 结束互动
     endInteraction() {
       this.isInteraction = false;
+      this.avatarPosition = "corner";
+      this.currentDanmaku = null;
       if (this.interactionTimer) {
         clearInterval(this.interactionTimer);
         this.interactionTimer = null;
       }
+      // 停止获取弹幕
+      this.stopDanmakuFetch();
       // 发送互动结束信号给后端
       this.wsClient.sendData({
         type: "event",
@@ -477,6 +511,110 @@ export default {
       });
     },
     
+    // 获取弹幕历史
+    async fetchDanmakuHistory() {
+      try {
+        const url = 'http://localhost:8001/danmaku';
+        const params = new URLSearchParams();
+        
+        if (this.lastDanmakuFetchTime) {
+          params.append('since', this.lastDanmakuFetchTime);
+        }
+        
+        console.log("fetching danmaku:", `${url}?${params.toString()}`);
+
+        const response = await fetch(`${url}?${params.toString()}`);
+        const data = await response.json();
+        
+        if (data.data && data.data.length > 0) {
+          // 过滤出普通弹幕（排除礼物和醒目留言）
+          const newDanmakus = data.data.filter(d => !d.type || d.type !== 'gift' && d.type !== 'super_chat');
+          
+          // 添加到弹幕历史
+          this.danmakuHistory = [...this.danmakuHistory, ...newDanmakus];
+          
+          // 添加到待处理队列（去重）
+          newDanmakus.forEach(danmaku => {
+            const exists = this.pendingDanmakus.some(d => d.timestamp === danmaku.timestamp && d.uid === danmaku.uid && d.msg === danmaku.msg);
+            if (!exists && danmaku.msg && danmaku.msg.trim()) {
+              this.pendingDanmakus.push(danmaku);
+            }
+          });
+          
+          // 更新最后获取时间
+          this.lastDanmakuFetchTime = new Date().toISOString();
+          
+          console.log(`[弹幕] 获取到 ${newDanmakus.length} 条新弹幕，待处理队列: ${this.pendingDanmakus.length} 条`);
+        }
+      } catch (error) {
+        console.error('获取弹幕失败:', error);
+      }
+    },
+
+    // 开始定期获取弹幕
+    startDanmakuFetch() {
+      if (this.danmakuFetchTimer) {
+        clearInterval(this.danmakuFetchTimer);
+      }
+      
+      // 立即获取一次
+      this.fetchDanmakuHistory().then(() => {
+        // 获取弹幕后尝试处理待回答的弹幕
+        this.processPendingDanmakus();
+      });
+      
+      // 每隔3秒获取一次
+      this.danmakuFetchTimer = setInterval(() => {
+        if (this.isInteraction) {
+          this.fetchDanmakuHistory().then(() => {
+            // 获取弹幕后尝试处理待回答的弹幕
+            this.processPendingDanmakus();
+          });
+        }
+      }, 3000);
+    },
+
+    // 停止获取弹幕
+    stopDanmakuFetch() {
+      if (this.danmakuFetchTimer) {
+        clearInterval(this.danmakuFetchTimer);
+        this.danmakuFetchTimer = null;
+      }
+    },
+
+    // 处理待回答的弹幕
+    async processPendingDanmakus() {
+      if (!this.isInteraction) return;
+      if (this.isBackendBusy) return;
+      if (this.pendingDanmakus.length === 0) return;
+      
+      // 取出第一个待处理的弹幕
+      const danmaku = this.pendingDanmakus.shift();
+      
+      // 设置为当前正在回答的弹幕
+      this.currentDanmaku = danmaku;
+      
+      // 标记后端忙碌
+      this.isBackendBusy = true;
+      
+      console.log(`[互动] 开始回答弹幕: ${danmaku.uname} - ${danmaku.msg}`);
+      
+      // 发送用户输入给后端
+      this.wsClient.sendData({
+        type: "event",
+        data: { type: "user_input", content: danmaku.msg },
+      });
+    },
+
+    // 标记后端空闲
+    setBackendIdle() {
+      this.isBackendBusy = false;
+      // 尝试处理下一条弹幕
+      setTimeout(() => {
+        this.processPendingDanmakus();
+      }, 500);
+    },
+
     // 根据时间戳显示字幕
     startTimestampSubtitle(text, timestamps, mediaId) {
       console.log("DEBUG text:", text);
@@ -586,14 +724,20 @@ export default {
             // 构建data URL
             const imageUrl = `data:image/${format};base64,${mediaData}`;
             this.currentPptPage = pageNum;
-            // 清理旧的PPT图片URL，释放内存
-            this.currentSlideUrl = null;
-            // 强制垃圾回收
-            if (window.gc) {
-              window.gc();
-            }
-            // 设置新的PPT图片URL
-            this.currentSlideUrl = imageUrl;
+
+            this.pptContainerAnimationState = 'animation';
+
+            setTimeout(() => {
+              // 清理旧的PPT图片URL，释放内存
+              this.currentSlideUrl = null;
+              // 强制垃圾回收
+              if (window.gc) {
+                window.gc();
+              }
+              // 设置新的PPT图片URL
+              this.currentSlideUrl = imageUrl;
+              this.pptContainerAnimationState = '';
+            }, 1000);
             console.log(`[PPT] 显示幻灯片 ${pageNum}`);
             return;
           }
@@ -714,8 +858,11 @@ export default {
           // 处理互动开始事件
           if (type === "interaction_start") {
             this.isInteraction = true;
-            this.interactionTitle = "互动时间";
+            this.avatarPosition = "center";
+            this.interactionTitle = data.title || "互动时间";
             this.startInteractionTimer(data.duration);
+            // 开始定期获取弹幕
+            this.startDanmakuFetch();
             console.log(`[互动] 开始互动，持续 ${data.duration} 秒`);
             return;
           }
@@ -809,6 +956,24 @@ export default {
           // end of response
           in_response = false;
           console.log("end of response", message.response);
+          // 不再立即标记后端空闲，等待 response_audio_finished 事件
+        } else if (message.type === "response_audio_finished") {
+          // 后端已发送完所有音频，等待当前音频播放完毕后标记后端空闲
+          console.log("[DEBUG] response_audio_finished!!!");
+          // 如果正在播放音频，等待播放完毕
+          if (streamAudioPlayer && streamAudioPlayer.isStreaming) {
+            // 等待所有音频播放完毕
+            streamAudioPlayer.waitUntilAllFinished().then(() => {
+              console.log("[响应音频完成] 所有音频播放完毕，标记后端空闲");
+              self.setBackendIdle();
+            }).catch((error) => {
+              console.error("Error waiting for audio:", error);
+              self.setBackendIdle();
+            });
+          } else {
+            // 没有音频正在播放，直接标记后端空闲
+            self.setBackendIdle();
+          }
         }
       } catch (error) {
         console.error("Error processing event:", error);
@@ -819,9 +984,7 @@ export default {
     processEventQueue();
 
     this.keydownHandler = (e) => {
-      if (e.key === "Enter" && this.isInteraction) {
-        this.sendUserInput();
-      }
+      // 互动模式下不再需要Enter键发送输入（已删除输入框）
 
       if (e.target && e.target.tagName === "INPUT") {
         return;
@@ -956,7 +1119,13 @@ export default {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   z-index: 5;
   overflow: hidden;
+  opacity: 1;
+  transition: opacity 1s ease;
 }
+.ppt-container.animation {
+  opacity: 0;
+}
+
 /* PPT幻灯片样式 */
 .ppt-slide {
   width: 100%;
@@ -969,7 +1138,7 @@ export default {
 .interaction-container {
   position: absolute;
   top: 1vh;
-  right: 1vw;
+  left: 1vw;
   width: 30vw;
   background: rgba(255, 255, 255, 0.9);
   border-radius: 10px;
@@ -997,30 +1166,70 @@ export default {
   color: #e74c3c;
 }
 
-.interaction-input {
-  display: flex;
-  gap: 10px;
+/* 当前回答弹幕展示区域样式 */
+.current-danmaku-container {
+  position: absolute;
+  top: 5vh;
+  right: 8vw;
+  width: 35vw;
+  background: linear-gradient(to bottom, #FFB6C1 50%, #FFFFFF 50%);
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  padding: 20px;
+  z-index: 24;
 }
 
-.interaction-input input {
-  flex: 1;
-  padding: 10px;
-  border: 1px solid #ddd;
-  border-radius: 5px;
-  font-size: 1em;
+.current-danmaku-header {
+  font-size: 1.3em;
+  font-weight: bold;
+  color: #333333;
+  margin-bottom: 15px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  padding-bottom: 12px;
 }
 
-.interaction-input button {
-  padding: 10px 20px;
-  background-color: #3498db;
-  color: white;
-  border: none;
-  border-radius: 5px;
-  font-size: 1em;
+.current-danmaku-content {
+  font-size: 1.5em;
+  color: #333333;
 }
 
-.interaction-input button:hover {
-  background-color: #2980b9;
+.danmaku-username {
+  color: #FF69B4;
+  font-weight: bold;
+  margin-right: 15px;
+}
+
+.danmaku-message {
+  color: #333333;
+}
+
+/* 弹幕动画样式 */
+.danmaku-enter-active {
+  transition: all 0.5s ease;
+}
+
+.danmaku-leave-active {
+  transition: all 0.5s ease;
+}
+
+.danmaku-enter-from {
+  opacity: 0;
+  transform: translateY(-50px);
+}
+
+.danmaku-enter-to {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.danmaku-leave-from {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.danmaku-leave-to {
+  opacity: 0;
+  transform: translateY(-50px);
 }
 
 .canvas-container {
@@ -1034,6 +1243,18 @@ export default {
   align-items: flex-start;
   z-index: 10;
   overflow: hidden;
+  transition: all 1s ease;
+}
+
+.canvas-container.center {
+  width: 60vw;
+  height: 100vh;
+  right: calc(50vw - 60vw / 2);
+  bottom: 0;
+}
+
+.canvas-container.out {
+  transform: translateY(100vh);
 }
 
 .main_canvas {
@@ -1091,8 +1312,7 @@ export default {
   left: 8vw;
   bottom: 4vh;
   width: calc(100vw - 16.5vw - 25vw);
-  min-height: 7.5vh;
-  max-height: 7.5vh;
+  height: 90px;
   background: rgba(255, 255, 255, 0.663);
   border-radius: 1.5vh;
   box-shadow: 0 0.8vh 3.2vh rgba(0, 0, 0, 0.3);

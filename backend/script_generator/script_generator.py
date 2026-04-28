@@ -66,10 +66,13 @@ def generate_command_json(elements_info, output_dir):
                         "audio": audio_path,
                         "text": sentence
                     }
+                    commands.append(command)
+                    current_audio_counter += 1
 
             commands.append({
                 "type": "interaction_start",
                 "duration": int(element_info["interval"]) if element_info["interval"] else 0,
+                "title": element_info["title"] if element_info["title"] else "",
                 "prompt": element_info["prompt"]
             })
 
@@ -120,6 +123,7 @@ async def main(path_to_script: PathLike, output_dir: PathLike):
         
         elif element.tag == "interaction":
             interval = element.get("interval")
+            title = element.get("title", "")
             prompt_elem = element.find("prompt")
             prompt = prompt_elem.text.strip() if prompt_elem is not None and prompt_elem.text else ""
             
@@ -130,6 +134,7 @@ async def main(path_to_script: PathLike, output_dir: PathLike):
             elements_info.append({
                 "type": "interaction",
                 "interval": interval,
+                "title": title,
                 "prompt": prompt,
                 "sentences": sentences
             })
@@ -138,6 +143,8 @@ async def main(path_to_script: PathLike, output_dir: PathLike):
                 if sentence.strip():
                     audio_tasks.append((audio_counter, sentence))
                     audio_counter += 1
+    
+    generate_command_json(elements_info, output_dir)
     
     # 过滤已完成的音频任务
     remaining_tasks = []

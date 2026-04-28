@@ -245,6 +245,31 @@ export default class StreamAudioPlayer {
   }
 
   /**
+   * 等待所有音频播放完毕
+   */
+  async waitUntilAllFinished() {
+    console.log("[DEBUG] waiting all media until finish:", "played_samples", this.playedSamples, "total_samples", this.totalSamplesScheduled);
+    
+    if (this.totalSamplesScheduled === 0 || this.playedSamples >= this.totalSamplesScheduled) {
+      return;
+    }
+
+    try {
+      while (this.playedSamples < this.totalSamplesScheduled) {
+        if (!this.isStreaming || !this.audioContext || this.audioContext.state === 'closed') {
+          console.log("[DEBUG] Stream stopped, exiting wait");
+          return;
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    } catch (error) {
+      console.error("Error waiting for all audio:", error);
+    }
+    
+    console.log("[DEBUG] All audio finished");
+  }
+
+  /**
    * 解码 WAV 数据
    */
   async decodeWavData(wavArrayBuffer) {

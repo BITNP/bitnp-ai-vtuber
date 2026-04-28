@@ -64,4 +64,5 @@ dependencies = [
     "pdf2image>=1.17.0",
     "onnxruntime>=1.24.3",
     "lxml>=6.1.0",
+    "blivedm>=0.1.1",
 ]

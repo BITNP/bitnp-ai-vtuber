@@ -388,10 +388,73 @@ export default class Live2dController {
             model.internalModel.coreModel.old_update(...args);
         }
 
+        let prevWindowInnerWidth = window.innerWidth;
+        let prevWindowInnerHeight = window.innerHeight;
+
         // 响应窗口尺寸变化
+
         window.addEventListener('resize', () => {
             updateModelPosition();
         });
+
+        this.canvas.addEventListener('resize', () => {
+            updateModelPosition();
+        });
+
+        // this.setupCanvasResolutionListener(app);
+    }
+
+    /**
+     * 设置canvas分辨率监听器
+     * 当canvas显示尺寸变化过大时，自动更新像素尺寸以保持画质
+     * @param {Application} app PIXI应用实例
+     */
+    setupCanvasResolutionListener(app) {
+        const self = this;
+        let lastCanvasWidth = this.canvas.width;
+        let lastCanvasHeight = this.canvas.height;
+        const RESOLUTION_THRESHOLD = 0.15; // 变化超过15%时触发更新
+        const CHECK_INTERVAL = 16; // 约60fps检查频率
+
+        function checkCanvasSize() {
+            // 获取canvas的实际显示尺寸
+            const rect = self.canvas.getBoundingClientRect();
+            const displayWidth = rect.width;
+            const displayHeight = rect.height;
+
+            // 计算尺寸变化比例
+            const widthRatio = displayWidth / lastCanvasWidth;
+            const heightRatio = displayHeight / lastCanvasHeight;
+
+            // 检查是否需要更新像素尺寸
+            if (Math.abs(widthRatio - 1) > RESOLUTION_THRESHOLD || 
+                Math.abs(heightRatio - 1) > RESOLUTION_THRESHOLD) {
+                
+                // 更新canvas像素尺寸以匹配显示尺寸
+                const dpr = window.devicePixelRatio || 1;
+                const newWidth = Math.round(displayWidth * dpr);
+                const newHeight = Math.round(displayHeight * dpr);
+
+                // 仅在尺寸确实变化时更新
+                if (newWidth !== self.canvas.width || newHeight !== self.canvas.height) {
+                    self.canvas.width = newWidth;
+                    self.canvas.height = newHeight;
+                    
+                    // 更新PIXI renderer尺寸
+                    app.renderer.resize(newWidth, newHeight);
+                    
+                    lastCanvasWidth = newWidth / dpr;
+                    lastCanvasHeight = newHeight / dpr;
+                    
+                    console.log(`Canvas resolution updated: ${newWidth}x${newHeight}`);
+                }
+            }
+
+            requestAnimationFrame(checkCanvasSize);
+        }
+
+        // 启动监听器
+        checkCanvasSize();
     }
 
 

@@ -406,6 +406,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "av" },
+    { name = "blivedm" },
     { name = "chardet" },
     { name = "cn2an" },
     { name = "ctranslate2" },
@@ -472,6 +473,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "av", specifier = ">=11" },
+    { name = "blivedm", specifier = ">=0.1.1" },
     { name = "chardet", specifier = ">=5.2.0" },
     { name = "cn2an", specifier = ">=0.5.23" },
     { name = "ctranslate2", specifier = ">=4.0,<5" },
@@ -530,6 +532,47 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.38.0" },
     { name = "wordsegment", specifier = ">=1.3.1" },
     { name = "x-transformers", specifier = ">=2.11.23" },
+]
+
+[[package]]
+name = "blivedm"
+version = "0.1.1"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "brotli" },
+]
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/8c/1e/5654d3d8af9c289639af48dbcba22a28dc47f34350bad742d1bf1ea72bc1/blivedm-0.1.1.tar.gz", hash = "sha256:b6e1a9d274ee8d868128c57db6cc01ad5ab7d0434a00f86c0142ea4eb4be4864" }
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/b2/e3/680ec3f2a3fd267fe63bc7414eff52a16c2cbd76e78984b754961ff39b0a/blivedm-0.1.1-py3-none-any.whl", hash = "sha256:ad75aaafde5c3c7f8686b545c758eb15ee2f282fb8ff542dab76172ad64c48d1" },
+]
+
+[[package]]
+name = "brotli"
+version = "1.0.9"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/2a/18/70c32fe9357f3eea18598b23aa9ed29b1711c3001835f7cf99a9818985d0/Brotli-1.0.9.zip", hash = "sha256:4d1b810aa0ed773f81dceda2cc7b403d01057458730e309856356d4ef4188438" }
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/45/6d/371943e00e09969c8d50c3e076c1335fe1b07a2a8920e639726c9d857427/Brotli-1.0.9-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:9744a863b489c79a73aba014df554b0e7a0fc44ef3f8a0ef2a52919c7d155031" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/26/84/fefe2407f323a6a37b84212fc3caba85c537e83f7ecfa85d1c44e02808ff/Brotli-1.0.9-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:a72661af47119a80d82fa583b554095308d6a4c356b2a554fdc2799bc19f2a43" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/20/70/76b8bda2fb5c498b2730f060ed28bbee27be0419a1824d09262f64e9114e/Brotli-1.0.9-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:7ee83d3e3a024a9618e5be64648d6d11c37047ac48adff25f12fa4226cf23d1c" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/b5/1b/da5ed1a3b8b86b7adc83839ff5d832af9e01e661c976af3453be82a30f94/Brotli-1.0.9-cp310-cp310-manylinux_2_5_i686.manylinux1_i686.manylinux_2_12_i686.manylinux2010_i686.whl", hash = "sha256:19598ecddd8a212aedb1ffa15763dd52a388518c4550e615aed88dc3753c0f0c" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/ba/d4/568fb9bb6819188317edd3f7bba157cafa3f1c1a87a2cbf73ff464a0c808/Brotli-1.0.9-cp310-cp310-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_12_x86_64.manylinux2010_x86_64.whl", hash = "sha256:44bb8ff420c1d19d91d79d8c3574b8954288bdff0273bf788954064d260d7ab0" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/0d/d0/99ce3e68b6132900cafd8372a1717bdbe03ed5f858c1f0795a54e6c535bc/Brotli-1.0.9-cp310-cp310-musllinux_1_1_aarch64.whl", hash = "sha256:e23281b9a08ec338469268f98f194658abfb13658ee98e2b7f85ee9dd06caa91" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/62/39/c1ce8e26bd9c5f514c8c422797de83f0a1b474d766d3f846875394d093b7/Brotli-1.0.9-cp310-cp310-musllinux_1_1_i686.whl", hash = "sha256:3496fc835370da351d37cada4cf744039616a6db7d13c430035e901443a34daa" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/55/20/79ac7c3cc68e9a56b73c3b24474517e75fe39e0693c426e17b2631589e53/Brotli-1.0.9-cp310-cp310-musllinux_1_1_x86_64.whl", hash = "sha256:b83bb06a0192cccf1eb8d0a28672a1b79c74c3a8a5f2619625aeb6f28b3a82bb" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/cb/20/ccab7c3f1e4e90609f39f59e4eaa8b829d01a68ac4daa8e15f5c46354e73/Brotli-1.0.9-cp310-cp310-win32.whl", hash = "sha256:26d168aac4aaec9a4394221240e8a5436b5634adc3cd1cdf637f6645cecbf181" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/6b/11/7d28cd3a5492fed09159e9b37613fdcec7655d93dec664b79d4bb4bb67b8/Brotli-1.0.9-cp310-cp310-win_amd64.whl", hash = "sha256:622a231b08899c864eb87e85f81c75e7b9ce05b001e59bbfbf43d4a71f5f32b2" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/56/aa/27093315722a8c64c9627b2f010cf0802f474e9d8395e127ee8ea72eb73a/Brotli-1.0.9-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:cc0283a406774f465fb45ec7efb66857c09ffefbe49ec20b7882eff6d3c86d3a" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/ad/fe/4008cb70e2f46ec5888ebc856cb4ffbc67f5930e5f69e5e8c901a79c615c/Brotli-1.0.9-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:11d3283d89af7033236fa4e73ec2cbe743d4f6a81d41bd234f24bf63dde979df" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/e1/f1/7bfd2225e54cc7391a5639d8b481796a38d6518c27db106af9333d60190e/Brotli-1.0.9-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:3c1306004d49b84bd0c4f90457c6f57ad109f5cc6067a9664e12b7b79a9948ad" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/00/7f/6d3405fbbd6883bca364e1d2b8ddbd0617bf063f35bed2c912f8fc723cc2/Brotli-1.0.9-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:b1375b5d17d6145c798661b67e4ae9d5496920d9265e2f00f1c2c0b5ae91fbde" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/02/f6/743a4364e89c4942edfe28127ba62ae09d720558d624ce10120342b391bc/Brotli-1.0.9-cp311-cp311-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:cab1b5964b39607a66adbba01f1c12df2e55ac36c81ec6ed44f2fca44178bf1a" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/cd/e8/dedb645aa5a3d696cbf6740a8e516ab4646c243a94eb6a6c0bd285674187/Brotli-1.0.9-cp311-cp311-musllinux_1_1_aarch64.whl", hash = "sha256:8ed6a5b3d23ecc00ea02e1ed8e0ff9a08f4fc87a1f58a2530e71c0f48adf882f" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/54/ff/2186987dd0cbe55376ed546e77832190c75c6d61b0a662a9602267c705fb/Brotli-1.0.9-cp311-cp311-musllinux_1_1_i686.whl", hash = "sha256:cb02ed34557afde2d2da68194d12f5719ee96cfb2eacc886352cb73e3808fc5d" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/66/66/684696e503fbe7ade3d6a1a73e6863ec43a326491dc0749666abc4960589/Brotli-1.0.9-cp311-cp311-musllinux_1_1_x86_64.whl", hash = "sha256:b3523f51818e8f16599613edddb1ff924eeb4b53ab7e7197f85cbc321cdca32f" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/87/19/e1900b41e12ca58c3263564a0605a7b889d0fbdb203ed7feb83da6ee4686/Brotli-1.0.9-cp311-cp311-win32.whl", hash = "sha256:ba72d37e2a924717990f4d7482e8ac88e2ef43fb95491eb6e0d124d77d2a150d" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/a9/e7/89612a136a8dd94ec5cf430ffa7a6b2280355320d21aa48da40f57d9de1b/Brotli-1.0.9-cp311-cp311-win_amd64.whl", hash = "sha256:3ffaadcaeafe9d30a7e4e1e97ad727e4f5610b9fa2f7551998471e3736738679" },
 ]
 
 [[package]]

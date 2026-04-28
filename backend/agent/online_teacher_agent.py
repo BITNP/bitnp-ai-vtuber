@@ -37,9 +37,10 @@ class OnlineTeacherAgent(Agent):
         self.interaction_prompt = ""
         self.interaction_duration = 0
         self.first_sentence_emitted = False
+        self.response_done = False  # 标记LLM回复是否已完成
 
         # streaming workflow: sentence_sep -> brackets_parsor -> event_emitter
-        self.sentence_sep_node = SentenceSepNode(seps = ".,:;?!。，：；？！\n ")
+        self.sentence_sep_node = SentenceSepNode(seps = "。，：；？！\n ")
         self.brackets_parsor_node = BracketsParsorNode()
 
         async def event_emitter_lambda(_, data):
@@ -61,6 +62,7 @@ class OnlineTeacherAgent(Agent):
             """
             Handle user input event
             """
+            # self.response_done = False  # 重置回复完成标志
             self.first_sentence_emitted = False
             if self.is_interaction:
                 content = event_data.get("content", "")
@@ -150,9 +152,20 @@ class OnlineTeacherAgent(Agent):
             if self.is_interaction and self.interaction_commands:
                 # 取出第一个命令并发送
                 event_data = self.interaction_commands.pop(0)
-                print("DEBUG send audio:", event_data["content"])
                 await self.emit(event_data)
                 print("DEBUG audio sent:", event_data["content"])
+
+                # 检查是否所有语音都已生成完毕
+                # 条件：LLM回复已完成 且 分句节点buffer为空 且 交互命令队列为空
+                # print("DEBUG 检查是否所有语音都已生成完毕")
+                # print(f"LLM回复已完成: {self.response_done}")
+                # print(f"分句节点buffer为空: {not self.sentence_sep_node.buffer}")
+                # print(f"交互命令队列为空: {not self.interaction_commands}")
+                if self.response_done and not self.sentence_sep_node.buffer and not self.interaction_commands:
+                    print("!!!DEBUG response_audio_finished!!!")
+                    await self.emit({"type": "response_audio_finished"})
+
+                    self.response_done = False  # 重置回复完成标志
 
     async def handle_ppt_command(self, command):
         """
@@ -226,6 +239,7 @@ class OnlineTeacherAgent(Agent):
         self.interaction_duration = command["duration"]
         self.interaction_prompt = command["prompt"]
         self.first_sentence_emitted = False
+        self.response_done = False  # 重置回复完成标志
 
         # 发送互动开始信号
         await self.emit({"type": "interaction_start", "duration": self.interaction_duration, "prompt": self.interaction_prompt})
@@ -245,25 +259,17 @@ class OnlineTeacherAgent(Agent):
         async def handle_message_delta(data):
             content_chunk = data["content"]
             
-            # # 1. 首先检查PPT/PDF翻页指令 - 最高优先级，不等待任何操作
-            # import re
-            # pattern = r'\[(?:PPT_([0-9]+)|PDF_([0-9]+)|翻页:?\s*([0-9]+))\]'
-            # matches = list(re.finditer(pattern, content_chunk))
-            
-            # for match in matches:
-            #     page_num = int(match.group(1) if match.group(1) else (match.group(2) if match.group(2) else match.group(3)))
-            #     if 1 <= page_num <= 100:
-            #         # 立即发送翻页事件，不等待任何其他操作
-            #         await self.emit({"type": "flip_ppt_page", "page_num": page_num})
-            
             # 2. 然后处理文本和TTS合成 - 低优先级，可延迟
             await self.sentence_sep_node.handle(content_chunk)
         
         @self.llm.on("done")
         async def handle_done(data):
+            print("DEBUG: LLM response done!!!")
+            self.response_done = True
             self.llm.messages.append({"role": "assistant", "content": data["content"]})
             await self.sentence_sep_node.handle(" ")
             await self.emit({"type": "end_of_response", "response": data["content"]})
+            # 标记LLM回复完成
             
             # 检查AI回复中是否包含PPT翻页指令
             # response_content = data["content"]
@@ -346,6 +352,7 @@ class OnlineTeacherAgent(Agent):
             except Exception as e:
                 print(f"TTS合成出错: {e}")
                 raise e
+
         elif data_type == "tag":
             self._curr_agent_response += f"[{content}]"
             await self.emit({"type": "bracket_tag", "content": content})
