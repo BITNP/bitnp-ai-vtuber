@@ -26,7 +26,11 @@
       <div class="countdown" style="position: absolute; top: 50px; left: 100px; font-size: 3rem; font-weight: bold; color: white; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); text-align: left;">
         <span style="font-size: 4rem;">{{ liveTitle }}</span>
         <br>
-        距离直播开始还有 {{ countdownMinutes.toString().padStart(2, '0') }}:{{ countdownSeconds.toString().padStart(2, '0') }}
+        距离直播开始还有
+
+        <span style="font-size: 8rem; -webkit-text-stroke: 5px rgb(165 0 255);">
+          {{ countdownMinutes.toString().padStart(2, '0') }}:{{ countdownSeconds.toString().padStart(2, '0') }}
+        </span>
       </div>
       
       <!-- 直播主题 -->
