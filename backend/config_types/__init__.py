@@ -37,6 +37,7 @@ class LLM_Config(CompatibaleModel):
     model_name: str
     system_prompt: str
     max_context_length: int
+    base_url: str = None
 
 
 class Genie_TTS_Config(CompatibaleModel):

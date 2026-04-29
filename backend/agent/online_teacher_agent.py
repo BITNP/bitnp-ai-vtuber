@@ -21,7 +21,7 @@ def is_empty(content: str) -> bool:
     return not content.strip()
 
 class OnlineTeacherAgent(Agent):
-    def __init__(self, server_url: str, agent_name: str, llm_api_config: LLM_Config, tts_config: TTS_Config, command_json_path: str, tts_stream: bool = False):
+    def __init__(self, server_url: str, agent_name: str, llm_api_config: LLM_Config, tts_config: TTS_Config, command_json_path: str, tts_stream: bool = False, start_at: str = None):
         super().__init__(server_url, agent_name)
 
         self.llm_api_config = llm_api_config
@@ -39,9 +39,11 @@ class OnlineTeacherAgent(Agent):
         self.interaction_duration = 0
         self.first_sentence_emitted = False
         self.response_done = False  # 标记LLM回复是否已完成
+        self.start_at = start_at  # 起始位置参数
+        self.current_page = 0  # 当前PPT页数
 
         # streaming workflow: sentence_sep -> brackets_parsor -> event_emitter
-        self.sentence_sep_node = SentenceSepNode(seps = "。，：；？！\n ")
+        self.sentence_sep_node = SentenceSepNode(seps = "。，：；？！\n")
         self.brackets_parsor_node = BracketsParsorNode()
 
         async def event_emitter_lambda(_, data):
@@ -126,7 +128,68 @@ class OnlineTeacherAgent(Agent):
         if self.is_interaction:
             self.is_interaction = False
 
+        # 如果指定了起始位置，跳转到指定位置
+        if self.start_at:
+            await self.jump_to_start_position()
+
         await self.process_next_command()
+
+    async def jump_to_start_position(self):
+        """
+        Jump to the specified start position
+        Format: 'ppt:N' or 'interaction:NAME'
+        """
+        if not self.start_at:
+            return
+
+        parts = self.start_at.split(":", 1)
+        if len(parts) != 2:
+            print(f"Invalid start_at format: {self.start_at}")
+            return
+
+        start_type, start_value = parts[0], parts[1]
+
+        if start_type == "ppt":
+            # 找到指定PPT页的命令索引
+            try:
+                target_page = str(start_value)
+                for i, command in enumerate(self.commands):
+                    if command.get("type") == "ppt" and str(command.get("page")) == target_page:
+                        self.current_command_index = i
+                        print(f"Jumping to PPT page {target_page} at command index {i}")
+                        return
+                print(f"PPT page {target_page} not found in commands")
+            except ValueError:
+                print(f"Invalid PPT page number: {start_value}")
+
+        elif start_type == "interaction":
+            # 找到指定name的interaction命令索引
+            target_name = start_value
+            for i, command in enumerate(self.commands):
+                if command.get("type") == "interaction_start":
+                    # 检查title是否匹配
+                    if command.get("title") == target_name:
+                        # 从该interaction指令向前查找第一个PPT指令
+                        prev_ppt_command = None
+                        for j in range(i-1, -1, -1):
+                            if self.commands[j].get("type") == "ppt":
+                                prev_ppt_command = self.commands[j]
+                                break
+                        
+                        # 如果找到PPT指令，先发送翻页命令
+                        if prev_ppt_command:
+                            page_num = prev_ppt_command["page"]
+                            print(f"Adding PPT page {page_num} flip before interaction '{target_name}'")
+                            await self.handle_ppt_command(prev_ppt_command)
+                        else:
+                            print(f"No PPT command found before interaction '{target_name}'")
+                        
+                        self.current_command_index = i
+                        print(f"Jumping to interaction '{target_name}' at command index {i}")
+                        return
+            print(f"Interaction '{target_name}' not found in commands")
+        else:
+            print(f"Invalid start_at type: {start_type}")
 
     async def process_next_command(self):
         """
@@ -150,7 +213,14 @@ class OnlineTeacherAgent(Agent):
             Process next command in interaction
             """
             print("DEBUG process_next_command_in_interaction")
-            if self.is_interaction and self.interaction_commands:
+            if self.is_interaction:
+
+                if not self.interaction_commands:
+                    print("!!!DEBUG response_audio_finished!!!")
+                    await self.emit({"type": "response_audio_finished"})
+                    self.response_done = False  # 重置回复完成标志
+                    return
+
                 # 取出第一个命令并发送
                 event_data = self.interaction_commands.pop(0)
                 await self.emit(event_data)
@@ -158,11 +228,11 @@ class OnlineTeacherAgent(Agent):
 
                 # 检查是否所有语音都已生成完毕
                 # 条件：LLM回复已完成 且 分句节点buffer为空 且 交互命令队列为空
-                # print("DEBUG 检查是否所有语音都已生成完毕")
-                # print(f"LLM回复已完成: {self.response_done}")
-                # print(f"分句节点buffer为空: {not self.sentence_sep_node.buffer}")
-                # print(f"交互命令队列为空: {not self.interaction_commands}")
-                if self.response_done and not self.sentence_sep_node.buffer and not self.interaction_commands:
+                print("DEBUG 检查是否所有语音都已生成完毕")
+                print(f"LLM回复已完成: {self.response_done}")
+                print(f"分句节点buffer为空: {not self.sentence_sep_node.buffer.strip()}")
+                print(f"交互命令队列为空: {not self.interaction_commands}")
+                if self.response_done and not self.sentence_sep_node.buffer.strip() and not self.interaction_commands:
                     print("!!!DEBUG response_audio_finished!!!")
                     await self.emit({"type": "response_audio_finished"})
 
@@ -173,6 +243,7 @@ class OnlineTeacherAgent(Agent):
         Handle PPT command
         """
         page_num = command["page"]
+        self.current_page = page_num  # 更新当前PPT页数
         ppt_dir = os.path.join(os.path.dirname(self.command_json_path), "ppt")
         ppt_path = os.path.join(ppt_dir, f"{page_num}.png")
 
@@ -272,22 +343,6 @@ class OnlineTeacherAgent(Agent):
             await self.sentence_sep_node.handle(" ")
             await self.emit({"type": "end_of_response", "response": data["content"]})
             # 标记LLM回复完成
-            
-            # 检查AI回复中是否包含PPT翻页指令
-            # response_content = data["content"]
-            # import re
-            
-            # # 匹配多种格式：
-            # # 1. [PPT_2] (来自PPT的格式)
-            # # 2. [PDF_2] (来自PDF的格式)
-            # # 3. [翻页:1] 或 [翻页: 1] (旧格式)
-            # pattern = r'\[(?:PPT_([0-9]+)|PDF_([0-9]+)|翻页:?\s*([0-9]+))\]'
-            # match = re.search(pattern, response_content)
-            
-            # if match:
-            #     # 获取匹配到的页码（从三个捕获组中取非None的那个）
-            #     page_num = int(match.group(1) if match.group(1) else (match.group(2) if match.group(2) else match.group(3)))
-            #     await self.emit({"type": "flip_ppt_page", "page_num": page_num})
 
     async def handle_event(self, data: dict):
         """
@@ -318,16 +373,15 @@ class OnlineTeacherAgent(Agent):
 
                         # 构建事件数据
                         event_data = {"type": "say_aloud", "content": display_text, "media_data": base64_data, "format": "wav", "is_last": True, "seq": 0}
-                        
+
                         # 检查是否在交互期间
                         if self.is_interaction:
+                            self.interaction_commands.append(event_data)
                             # 首句直接发送
                             if not self.first_sentence_emitted:
-                                await self.emit(event_data)
+                                # await self.emit(event_data)
+                                await self.process_next_command_in_interaction()
                                 self.first_sentence_emitted = True
-                            else:
-                                # 后续句子存储到 interaction_commands
-                                self.interaction_commands.append(event_data)
                         else:
                             # 非交互期间直接发送
                             await self.emit(event_data)

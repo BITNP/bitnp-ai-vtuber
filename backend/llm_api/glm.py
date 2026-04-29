@@ -12,7 +12,7 @@ class GlmBot(AbstractBot):
     A delegate used to communicate with GLM-4 api
     """
     
-    def __init__(self, token: str, model_name: Optional[str] = None, system_prompt: Optional[str] = None, max_context_length: int = 11):
+    def __init__(self, token: str, model_name: Optional[str] = None, system_prompt: Optional[str] = None, max_context_length: int = 11, base_url: Optional[str] = None):
         super().__init__()
         
         self.token = token

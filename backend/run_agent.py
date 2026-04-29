@@ -22,6 +22,7 @@ parser.add_argument("--command-json", default="script_generator/output/command.j
 parser.add_argument("--tts-stream", action="store_true", help="enable tts stream")
 parser.add_argument("--no-tts-stream", action="store_true", help="disable tts stream")
 parser.add_argument("--no-auto-start", action="store_true", help="disable auto start for lecture_agent")
+parser.add_argument("--start-at", default=None, help="start from specific position, format: 'ppt:N' or 'interaction:NAME'")
 
 args = parser.parse_args()
 
@@ -36,13 +37,25 @@ agent_name = args.agent_name
 #     max_context_length = 11 # 最大上下文长度 (轮数)
 # )
 
+# # glm-4-flash
+# llm_api_config = LLM_Config(
+#     api_name = "glm",
+#     token = get_token("glm"),
+#     model_name = "glm-4-flash",
+#     system_prompt = "",
+#     max_context_length = 11
+# )
+
+# deepseek-v4
 llm_api_config = LLM_Config(
-    api_name = "glm",
-    token = get_token("glm"),
-    model_name = "glm-4-flash",
-    system_prompt = "",
-    max_context_length = 11
+    api_name = 'openai',
+    token = get_token('dashscope'),
+    model_name = 'deepseek-v4-pro',
+    base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    system_prompt = "", # 系统提示词
+    max_context_length = 11 # 最大上下文长度 (轮数)
 )
+
 
 # tts_config = Genie_TTS_Config(
 #     onnx_model_dir = os.path.join(curr_dir, "tts/genie/pretrained/IndexError/gptsovits-v2proplus-genie-onnx-export"),
@@ -95,6 +108,7 @@ elif args.agent_type == "online_teacher_agent":
         tts_config = tts_config,
         command_json_path = command_json_path,
         tts_stream = tts_stream,
+        start_at = args.start_at,
     )
 else:
     agent_config = AgentConfig(

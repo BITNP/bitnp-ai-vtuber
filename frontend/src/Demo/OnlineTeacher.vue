@@ -23,20 +23,24 @@
       </video>
       
       <!-- 倒计时显示 -->
-      <div class="countdown" style="position: absolute; top: 50px; left: 100px; font-size: 3rem; font-weight: bold; color: white; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); text-align: left;">
-        <span style="font-size: 4rem;">{{ liveTitle }}</span>
+      <div class="countdown" style="position: absolute; top: 30px; left: 80px; font-size: 3rem; font-weight: bold; color: white; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); text-align: left;">
+        <!-- <span style="font-size: 4rem;">{{ liveTitle }}</span> -->
+        <!-- <br> -->
+        <span style="font-size: 2rem; font-weight: 500;">距离直播开始还有</span>
         <br>
-        距离直播开始还有
 
-        <span style="font-size: 8rem; -webkit-text-stroke: 5px rgb(165 0 255);">
+        <span style="font-size: 8rem; font-weight: 500;">
           {{ countdownMinutes.toString().padStart(2, '0') }}:{{ countdownSeconds.toString().padStart(2, '0') }}
         </span>
       </div>
       
       <!-- 直播主题 -->
+
+      <!--
       <div class="live-title" style="position: absolute; bottom: 40px; right: 40px; font-size: 3rem; font-weight: bold; color: white; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); text-align: right;">
         {{ organizer }}
       </div>
+      -->
       
       <svg class="animation-mask">
         <mask id="ripple-mask">
@@ -208,6 +212,8 @@ export default {
       debug: false,
       audioEnabled: false, // The user needs to interact with the page (by clicking the button) to enable audio
       currentSubtitle: "", // 当前显示的字幕文本
+      
+      liveStarted: false, // 直播是否已开始
 
       imageSrc: "",
       inputText: "",
@@ -306,6 +312,15 @@ export default {
           if (success) {
             this.audioEnabled = true;
             console.log('音频已启用');
+
+            if (this.liveStarted) {
+              this.wsClient.sendData({
+                type: "event",
+                data: { type: "start_playback" },
+              });
+              this.lastDanmakuFetchTime = new Date().toISOString();
+            }
+
             resolve(true);
           } else {
             console.error('音频初始化失败');
@@ -321,8 +336,15 @@ export default {
     // 初始化倒计时
     initCountdown() {
       // DEBUG: 设置目标时间为当前时间后2分钟
-      this.countdownTarget = new Date();
-      this.countdownTarget.setSeconds(this.countdownTarget.getSeconds() + 20);
+      // this.countdownTarget = new Date();
+      // this.countdownTarget.setSeconds(this.countdownTarget.getSeconds() + 10);
+
+      this.countdownTarget = new Date(2026, 4-1, 29, 21, 15); // 2026-04-29 21:15:00
+
+      if (this.countdownTarget.getTime() <= Date.now()) {
+        this.countdownTarget = new Date();
+        this.countdownTarget.setSeconds(this.countdownTarget.getSeconds() + 10);
+      }
       
       // 开始倒计时
       this.updateCountdown();
@@ -372,11 +394,17 @@ export default {
             this.avatarPosition = "corner";
           }, 1000); // 10秒后切换回右下角位置
           // 发送开始播放信号给后端
-          this.wsClient.sendData({
-            type: "event",
-            data: { type: "start_playback" },
-          });
-          this.lastDanmakuFetchTime = new Date().toISOString();
+
+          this.liveStarted = true;
+
+          if (this.audioEnabled) {
+            // 防止当已经超过开始时间时，重新启动前端导致错误
+            this.wsClient.sendData({
+              type: "event",
+              data: { type: "start_playback" },
+            });
+            this.lastDanmakuFetchTime = new Date().toISOString();
+          }
         },
         { once: true },
       );
@@ -881,6 +909,10 @@ export default {
             // 重置互动状态标志
             this.interactionCountdownEnded = false;
             this.responseAudioFinished = true; // 默认没有正在播放的音频
+
+            // 弹幕获取时间界限设置为从1分钟之前开始
+            this.lastDanmakuFetchTime = new Date(new Date().getTime() - 60000).toISOString();
+
             this.startInteractionTimer(data.duration);
             // 开始定期获取弹幕
             this.startDanmakuFetch();
