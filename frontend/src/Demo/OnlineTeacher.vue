@@ -202,7 +202,7 @@ export default {
   data() {
     return {
       avatarPosition: 'center out',
-      pptContainerAnimationState: '',
+      pptContainerAnimationState: 'animation',
       masked: true, // 是否显示遮罩层, 初始为true，倒计时结束后变为false
       microphoneOn: false,
       debug: false,
@@ -244,6 +244,8 @@ export default {
       interactionTimeLeft: 0,
       interactionTarget: null,
       interactionTimer: null,
+      interactionCountdownEnded: false, // 倒计时是否已结束
+      responseAudioFinished: false, // 当前响应的音频是否已播放完毕
 
       // 弹幕相关配置
       danmakuHistory: [], // 存储弹幕历史
@@ -368,7 +370,7 @@ export default {
           this.avatarPosition = "center";
           setTimeout(() => {
             this.avatarPosition = "corner";
-          }, 10000); // 10秒后切换回右下角位置
+          }, 1000); // 10秒后切换回右下角位置
           // 发送开始播放信号给后端
           this.wsClient.sendData({
             type: "event",
@@ -489,7 +491,10 @@ export default {
       // 倒计时结束
       if (diff === 0) {
         clearInterval(this.interactionTimer);
-        this.endInteraction();
+        this.interactionCountdownEnded = true; // 标记倒计时已结束
+        console.log("[互动] 倒计时结束，等待最后一个问题音频播放完毕");
+        // 检查是否可以结束互动（倒计时结束且音频播放完毕）
+        this.tryEndInteraction();
       }
     },
 
@@ -509,6 +514,16 @@ export default {
         type: "event",
         data: { type: "interaction_finished" },
       });
+    },
+    
+    // 尝试结束互动（确保倒计时结束且最后一个音频播放完毕）
+    tryEndInteraction() {
+      if (this.interactionCountdownEnded && this.responseAudioFinished) {
+        console.log("[互动] 倒计时结束且音频播放完毕，结束互动");
+        this.endInteraction();
+      } else if (this.interactionCountdownEnded && !this.responseAudioFinished) {
+        console.log("[互动] 等待音频播放完毕...");
+      }
     },
     
     // 获取弹幕历史
@@ -596,6 +611,9 @@ export default {
       
       // 标记后端忙碌
       this.isBackendBusy = true;
+      
+      // 重置音频完成标志，表示有新的回答正在生成
+      this.responseAudioFinished = false;
       
       console.log(`[互动] 开始回答弹幕: ${danmaku.uname} - ${danmaku.msg}`);
       
@@ -860,9 +878,14 @@ export default {
             this.isInteraction = true;
             this.avatarPosition = "center";
             this.interactionTitle = data.title || "互动时间";
+            // 重置互动状态标志
+            this.interactionCountdownEnded = false;
+            this.responseAudioFinished = true; // 默认没有正在播放的音频
             this.startInteractionTimer(data.duration);
             // 开始定期获取弹幕
             this.startDanmakuFetch();
+            this.currentSubtitle = "";
+            this.$refs.subtitle.clear();
             console.log(`[互动] 开始互动，持续 ${data.duration} 秒`);
             return;
           }
@@ -965,14 +988,25 @@ export default {
             // 等待所有音频播放完毕
             streamAudioPlayer.waitUntilAllFinished().then(() => {
               console.log("[响应音频完成] 所有音频播放完毕，标记后端空闲");
+              self.responseAudioFinished = true; // 标记音频播放完毕
+              self.currentSubtitle = "";
+              self.$refs.subtitle.clear();
               self.setBackendIdle();
+              // 检查是否需要结束互动
+              self.tryEndInteraction();
             }).catch((error) => {
               console.error("Error waiting for audio:", error);
+              self.responseAudioFinished = true; // 标记音频播放完毕
               self.setBackendIdle();
+              // 检查是否需要结束互动
+              self.tryEndInteraction();
             });
           } else {
             // 没有音频正在播放，直接标记后端空闲
+            self.responseAudioFinished = true; // 标记音频播放完毕
             self.setBackendIdle();
+            // 检查是否需要结束互动
+            self.tryEndInteraction();
           }
         }
       } catch (error) {
