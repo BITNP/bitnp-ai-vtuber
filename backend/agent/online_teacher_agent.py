@@ -35,6 +35,7 @@ class OnlineTeacherAgent(Agent):
         self.is_playing = False
         self.is_interaction = False
         self.interaction_prompt = ""
+        self.interaction_title = ""
         self.interaction_duration = 0
         self.first_sentence_emitted = False
         self.response_done = False  # 标记LLM回复是否已完成
@@ -238,11 +239,12 @@ class OnlineTeacherAgent(Agent):
         self.interaction_commands = []
         self.interaction_duration = command["duration"]
         self.interaction_prompt = command["prompt"]
+        self.interaction_title = command["title"] if "title" in command else "互动时间"
         self.first_sentence_emitted = False
         self.response_done = False  # 重置回复完成标志
 
         # 发送互动开始信号
-        await self.emit({"type": "interaction_start", "duration": self.interaction_duration, "prompt": self.interaction_prompt})
+        await self.emit({"type": "interaction_start", "duration": self.interaction_duration, "prompt": self.interaction_prompt, "title": self.interaction_title})
 
         # 初始化LLM上下文
         self.llm_api_config.system_prompt = self.interaction_prompt

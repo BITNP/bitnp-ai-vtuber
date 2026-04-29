@@ -320,7 +320,7 @@ export default {
     initCountdown() {
       // DEBUG: 设置目标时间为当前时间后2分钟
       this.countdownTarget = new Date();
-      this.countdownTarget.setSeconds(this.countdownTarget.getSeconds() + 10);
+      this.countdownTarget.setSeconds(this.countdownTarget.getSeconds() + 20);
       
       // 开始倒计时
       this.updateCountdown();
