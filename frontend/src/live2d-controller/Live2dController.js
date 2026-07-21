@@ -5,6 +5,35 @@ import transferParams, { shouldSkip } from "./Patch.js";
 const MODEL_ANCHOR = {x: 0.5, y: 0.6}; // supposed to be the center of the model, change it if needed
 // TODO: adjust live2d position if needed
 
+// 表情实际驱动的模型参数子集。
+const EXPR_DRIVEN_PARAMS = [
+    "ParamEyeLOpen", "ParamEyeROpen", "ParamMouthForm",
+    "ParamAngleY", "ParamAngleX", "ParamAngleZ",
+    "ParamBrowLY", "ParamBrowRY",
+    "ParamEyeBallX", "ParamEyeBallY",
+];
+
+// 待机动作包络
+function smoothstep(x) { return x * x * (3 - 2 * x); }
+function holdEnv(p) {                                         
+    const r = 0.25;
+    if (p < r) return smoothstep(p / r);
+    if (p > 1 - r) return smoothstep((1 - p) / r);
+    return 1;
+}
+
+// 待机偶发动作
+// ax/ay/az 为头部角度偏移，ex/ey 为眼球偏移
+const IDLE_GESTURES = [
+    { name: 'lookLeft',  duration: 1600, offset: p => ({ ax:  6 * holdEnv(p), ex:  0.8 * holdEnv(p) }) },
+    { name: 'lookRight', duration: 1600, offset: p => ({ ax: -6 * holdEnv(p), ex: -0.8 * holdEnv(p) }) },
+    { name: 'lookUp',    duration: 1400, offset: p => ({ ay:  3 * holdEnv(p), ey:  0.6 * holdEnv(p) }) },
+    { name: 'lookDown',  duration: 1400, offset: p => ({ ay: -3 * holdEnv(p), ey: -0.6 * holdEnv(p) }) },
+    { name: 'tiltLeft',  duration: 1800, offset: p => ({ az:  5 * holdEnv(p) }) },
+    { name: 'tiltRight', duration: 1800, offset: p => ({ az: -5 * holdEnv(p) }) },
+    { name: 'nod',       duration: 1700, offset: p => ({ ay: 2.5 * Math.sin(p * Math.PI * 4) * holdEnv(p) }) },
+];
+
 function delay(ms) {
     return new Promise(resolve => {
         setTimeout(resolve, ms);
@@ -74,24 +103,29 @@ export default class Live2dController {
 
         this.faceParamExpressionLoopId = null;
 
-        // 马尔可夫链状态管理
-        this.idleState = 'idle'; // 初始状态改为idle，与stateDurations匹配
-        this.stateStartTime = 0;
-        this.stateDuration = 0;
-        
-        // 状态转移矩阵 [from][to] = probability
-        this.transitionMatrix = {
-            'headShake': { 'headShake': 0.3, 'blink': 0.7 },
-            'blink': { 'headShake': 0.3, 'blink': 0.1, 'idle': 0.6 },
-            'idle': { 'headShake': 0.1, 'blink': 0.4, 'idle': 0.5 } // 添加idle状态的转移规则
+        // 待机微动
+        this._idlePhase = {
+            angleX: Math.random() * Math.PI * 2,
+            angleY: Math.random() * Math.PI * 2,
+            angleZ: Math.random() * Math.PI * 2,
+            bodyY: Math.random() * Math.PI * 2,
+            eyeX: Math.random() * Math.PI * 2,
+            eyeY: Math.random() * Math.PI * 2,
+            browL: Math.random() * Math.PI * 2,
+            browR: Math.random() * Math.PI * 2,
+            mouth: Math.random() * Math.PI * 2,
         };
-        
-        // 各状态持续时间范围 (毫秒)
-        this.stateDurations = {
-            'headShake': [3000, 6000],
-            'blink': [400, 600],
-            'idle': [1000, 3000]
-        };
+
+        // 眨眼
+        this._blinkDuration = 420;                       
+        this._blinkIntervalRange = [2500, 5000];         
+        this._blinkStart = -1e9;                         
+        this._nextBlinkAt = Date.now() + this._randBlinkInterval();
+
+        // 偶发动作调度
+        this._gesture = null;                            
+        this._gestureIntervalRange = [4000, 9000];       
+        this._nextGestureAt = Date.now() + this._randGestureInterval();
 
         /**
          * 口型同步函数
@@ -103,6 +137,13 @@ export default class Live2dController {
 
         this.faceParamExpressionName = null;
         this.faceParamExpressionFrame = 0;
+
+        // 表情淡入淡出状态。 'in' | 'out' | null
+        this._exprFadeState = null;
+        this._exprFadeStart = 0;
+        this._exprFadeDuration = 150; 
+        this._exprTotalFrames = 0;    
+        this._resetConverged = false; 
 
         const faceParamExpressionReset = () => {
             // 复位
@@ -126,43 +167,88 @@ export default class Live2dController {
 
             if (canStop) {
                 // self.faceParamExpressionName = null;
+                self._resetConverged = true;
             }
         };
 
         // 初始化状态
-        this.startNewState();
-
         this.faceParamExpressionLoopId = setInterval(() => {
             const time = Date.now();
-            
+
             // 确保呼吸参数始终应用
             const breathCycle = 3000;
             const breath = 0.5 + 0.6 * Math.sin(time / breathCycle * (2 * Math.PI));
             self.dictParams["ParamBreath"] = breath;
-            
-            // 检查是否需要状态转移
-            if (time - this.stateStartTime > this.stateDuration) {
-                this.transitionState();
-            }
-            
-            // 执行当前状态的动作
-            this.executeCurrentState(time);
 
-            if (!self.faceParamExpressionName) {
-                faceParamExpressionReset();
+            const exprName = self.faceParamExpressionName;
+            const fadeState = self._exprFadeState;
+            const exprActive = exprName !== null || fadeState !== null;
+
+            // 仅在完全空闲时（无表情、无淡入淡出）运行 idle 状态机，
+            if (!exprActive) {
+                this.executeIdle(time);
+                this.executeBlinkSchedule(time);
+
+                if (!self._resetConverged) {
+                    faceParamExpressionReset();
+                }
                 return;
             }
-            const data = self.faceParamExpressionDict[self.faceParamExpressionName].data.data;
-            const expFps = self.faceParamExpressionDict[self.faceParamExpressionName].data.fps;
+
+            // 表情播放/淡入淡出
+            const entry = self.faceParamExpressionDict[exprName];
+            if (!entry) {
+                // 名字失效但状态未清，直接归位
+                self._exprFadeState = null;
+                self._resetConverged = false;
+                return;
+            }
+            const expFps = entry.data.fps;
+            const data = entry.data.data;
+            const totalFrames = self._exprTotalFrames || data.length;
 
             const frameIndex = Math.round(self.faceParamExpressionFrame * expFps / fps);
-            if (frameIndex >= data.length) {
-                // faceParamExpressionReset();
-                self.faceParamExpressionName = null;
-                return;
+
+            // 播放到末尾且未在淡出 → 开始淡出
+            if (self._exprFadeState === null && frameIndex >= totalFrames) {
+                self._exprFadeState = 'out';
+                self._exprFadeStart = time;
             }
-            const frame = data[frameIndex];
-            self.dictParams = transferParams(frame, self.dictParams);
+
+            // 计算淡入淡出 alpha
+            let alpha = 1;
+            if (self._exprFadeState === 'in') {
+                const t = Math.min((time - self._exprFadeStart) / self._exprFadeDuration, 1);
+                alpha = t * t * (3 - 2 * t); // smoothstep
+                if (t >= 1) self._exprFadeState = null;
+            } else if (self._exprFadeState === 'out') {
+                const t = Math.min((time - self._exprFadeStart) / self._exprFadeDuration, 1);
+                alpha = 1 - t * t * (3 - 2 * t);
+                if (t >= 1) {
+                    // 淡出完成
+                    self.faceParamExpressionName = null;
+                    self._exprFadeState = null;
+                    self._resetConverged = false;
+                    return;
+                }
+            }
+
+            // 应用当前帧
+            const fi = Math.min(frameIndex, totalFrames - 1);
+            if (fi >= 0 && fi < data.length) {
+                const frame = data[fi];
+                self.dictParams = transferParams(frame, self.dictParams);
+                // 把表情驱动参数向初始值方向混合
+                if (alpha < 1) {
+                    for (const paramName of EXPR_DRIVEN_PARAMS) {
+                        const initVal = self.initParamDict[paramName];
+                        const curVal = self.dictParams[paramName];
+                        if (initVal === undefined || curVal === undefined || isNaN(curVal)) continue;
+                        self.dictParams[paramName] = initVal + (curVal - initVal) * alpha;
+                    }
+                }
+            }
+
             // 确保呼吸参数始终应用
             self.dictParams["ParamBreath"] = breath;
             self.faceParamExpressionFrame += 1;
@@ -177,74 +263,101 @@ export default class Live2dController {
         this.lipSyncFunc = func;
     }
 
-    // 开始新状态
-    startNewState() {
-        this.stateStartTime = Date.now();
-        const [minDur, maxDur] = this.stateDurations[this.idleState];
-        this.stateDuration = minDur + Math.random() * (maxDur - minDur);
+    // 待机微动：头部偏航/俯仰/翻滚 + 身体摇摆 + 视线漂移 + 眉/嘴微动
+    executeIdle(time) {
+        const k = 0.12; // 缓动系数
+        const p = this._idlePhase;
+        const TAU = 2 * Math.PI;
+
+        // 基础漂移目标
+        let ax = 4.0 * Math.sin(TAU * time / 7000 + p.angleX);  // 偏航
+        let ay = 2.0 * Math.sin(TAU * time / 5500 + p.angleY);  // 俯仰(轻点头)
+        let az = 2.5 * Math.sin(TAU * time / 9000 + p.angleZ);  // 翻滚(歪头)
+        const by = 2.0 * Math.sin(TAU * time / 8000 + p.bodyY); // 身体摇摆
+        let ex = 0.30 * Math.sin(TAU * time / 6000 + p.eyeX);   // 视线 X
+        let ey = 0.25 * Math.sin(TAU * time / 4500 + p.eyeY);   // 视线 Y
+
+        // 眉/嘴
+        const browL0 = this.initParamDict["ParamBrowLY"] ?? 0;
+        const browR0 = this.initParamDict["ParamBrowRY"] ?? 0;
+        const mouth0 = this.initParamDict["ParamMouthForm"] ?? 0;
+        const browL = browL0 + 0.10 * Math.sin(TAU * time / 6500 + p.browL);
+        const browR = browR0 + 0.10 * Math.sin(TAU * time / 7100 + p.browR);
+        const mouth = mouth0 + 0.12 * Math.sin(TAU * time / 7500 + p.mouth);
+
+        // 偶发动作叠加（转头/抬头/歪头/点头），offset 自带淡入淡出
+        const gest = this._gestureOffset(time);
+        if (gest) {
+            ax += gest.ax || 0;
+            ay += gest.ay || 0;
+            az += gest.az || 0;
+            ex += gest.ex || 0;
+            ey += gest.ey || 0;
+        }
+
+        this._easeTo("ParamAngleX", ax, k);
+        this._easeTo("ParamAngleY", ay, k);
+        this._easeTo("ParamAngleZ", az, k);
+        this._easeTo("ParamBodyAngleY", by, k);
+        this._easeTo("ParamEyeBallX", ex, k);
+        this._easeTo("ParamEyeBallY", ey, k);
+        this._easeTo("ParamBrowLY", browL, k);
+        this._easeTo("ParamBrowRY", browR, k);
+        this._easeTo("ParamMouthForm", mouth, k);
     }
 
-    // 状态转移
-    transitionState() {
-        const currentState = this.idleState;
-        const transitions = this.transitionMatrix[currentState];
-        
-        // 根据转移概率选择下一个状态
-        let random = Math.random();
-        let cumulativeProb = 0;
-        
-        for (const [state, prob] of Object.entries(transitions)) {
-            cumulativeProb += prob;
-            if (random < cumulativeProb) {
-                this.idleState = state;
-                this.startNewState();
-                break;
+    // 偶发动作：到点触发一个随机动作，返回当前进度下的偏移量（或 null）
+    _gestureOffset(time) {
+        if (!this._gesture && time >= this._nextGestureAt) {
+            const preset = IDLE_GESTURES[Math.floor(Math.random() * IDLE_GESTURES.length)];
+            this._gesture = { preset, t0: time };
+        }
+        if (!this._gesture) return null;
+
+        const preset = this._gesture.preset;
+        const progress = (time - this._gesture.t0) / preset.duration;
+        if (progress >= 1) {
+            this._gesture = null;
+            this._nextGestureAt = time + this._randGestureInterval();
+            return null;
+        }
+        return preset.offset(progress);
+    }
+
+    _randGestureInterval() {
+        const [lo, hi] = this._gestureIntervalRange;
+        return lo + Math.random() * (hi - lo);
+    }
+
+    // 眨眼调度
+    executeBlinkSchedule(time) {
+        if (this._blinkStart < 0 && time >= this._nextBlinkAt) {
+            this._blinkStart = time;
+        }
+        if (this._blinkStart >= 0) {
+            const progress = Math.min((time - this._blinkStart) / this._blinkDuration, 1);
+            const eyeOpen = 1 - Math.sin(progress * Math.PI);
+            this.dictParams["ParamEyeLOpen"] = eyeOpen;
+            this.dictParams["ParamEyeROpen"] = eyeOpen;
+            if (progress >= 1) {
+                this._blinkStart = -1e9;
+                this._nextBlinkAt = time + this._randBlinkInterval();
             }
         }
     }
 
-    // 执行当前状态的动作
-    executeCurrentState(time) {
-        const k = 0.2;
-        
-        switch (this.idleState) {
-            case 'headShake':
-                this.executeHeadShake(time, k);
-                break;
-            case 'blink':
-                this.executeBlink(time, k);
-                break;
-            case 'idle':
-                // 空闲状态，保持自然姿态
-                break;
+    _easeTo(paramName, target, k) {
+        const cur = this.dictParams[paramName];
+        if (cur === undefined || isNaN(cur)) {
+            this.dictParams[paramName] = target;
+            return;
         }
+        this.dictParams[paramName] = cur * (1 - k) + target * k;
     }
 
-    // 执行摇头动作
-    executeHeadShake(time, k) {
-        const idleCycle = 3000;
-        const angleX = Math.sin(time / idleCycle * (2 * Math.PI)) * 5;
-        const angleZ = Math.cos(time / idleCycle * (2 * Math.PI)) * 3;
-        const threshold = 0.1;
-        
-        if (Math.abs(this.dictParams["ParamAngleX"] - angleX) > threshold) {
-            this.dictParams["ParamAngleX"] = this.dictParams["ParamAngleX"] * (1 - k) + angleX * k;
-        }
-        if (Math.abs(this.dictParams["ParamAngleZ"] - angleZ) > threshold) {
-            this.dictParams["ParamAngleZ"] = this.dictParams["ParamAngleZ"] * (1 - k) + angleZ * k;
-        }
-    }
-
-    // 执行眨眼动作
-    executeBlink(time, k) {
-        const elapsed = time - this.stateStartTime;
-        const progress = Math.min(elapsed / this.stateDuration, 1);
-        
-        // 使用正弦函数创建平滑的眨眼曲线
-        const eyeOpen = Math.cos(progress * Math.PI);
-        
-        this.dictParams["ParamEyeLOpen"] = this.dictParams["ParamEyeLOpen"] * (1 - k) + eyeOpen * k;
-        this.dictParams["ParamEyeROpen"] = this.dictParams["ParamEyeROpen"] * (1 - k) + eyeOpen * k;
+    _randBlinkInterval() {
+        const [lo, hi] = this._blinkIntervalRange;
+        return lo + Math.random() * (hi - lo);
     }
 
     async setup() {
